@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Wave Line Shader - Halftone Edition</title>
+  <style>
+    :root {
+      --sidebar-width: 290px;
+      --bg-color: #0a0a0a;
+      --panel-color: #161616;
+      --accent-color: #007bff;
+      --danger-color: #dc3545;
+      --success-color: #28a745;
+      --text-main: #e0e0e0;
+      --text-dim: #c8b84a;
+      --border-color: #2a2a2a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background: var(--bg-color);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      margin: 0;
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #left-panel {
+      width: 230px;
+      min-width: 230px;
+      background: var(--panel-color);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      padding: 10px 12px;
+      z-index: 100;
+      overflow-y: auto;
+    }
+
+    #sidebar {
+      width: var(--sidebar-width);
+      min-width: var(--sidebar-width);
+      background: var(--panel-color);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      padding: 10px 12px;
+      z-index: 100;
+      overflow-y: auto;
+    }
+
+    #viewport {
+      flex-grow: 1;
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    h2 {
+      font-size: 13px;
+      margin: 0 0 14px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #fff;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 10px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin: 7px 0 4px;
+    }
+
+    .drop-area {
+      border: 2px dashed #555;
+      border-radius: 8px;
+      padding: 8px 10px;
+      text-align: center;
+      color: #c8b84a;
+      transition: all 0.25s;
+      font-size: 11px;
+      font-weight: 600;
+      aspect-ratio: 1 / 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .drop-area.active    { border-color: var(--accent-color); background: rgba(0,123,255,.06); color: var(--accent-color); }
+    .drop-area.has-image { border-style: solid; border-color: var(--success-color); color: var(--success-color); }
+
+    details.adj-panel {
+      margin: 5px 0 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    details.adj-panel summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+      background: #1c1c1c;
+    }
+    details.adj-panel summary::-webkit-details-marker { display: none; }
+    details.adj-panel summary .arrow { font-size: 9px; transition: transform 0.2s; }
+    details.adj-panel[open] summary .arrow { transform: rotate(90deg); }
+    details.adj-panel summary:hover { color: var(--text-main); }
+
+    .adj-body {
+      padding: 6px 0 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .ctrl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ctrl-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .ctrl-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      flex: 1;
+    }
+    .ctrl-label input[type="checkbox"] {
+      width: 13px; height: 13px;
+      cursor: pointer;
+      accent-color: var(--accent-color);
+      margin: 0;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent-color);
+      cursor: pointer;
+    }
+    input[type="range"]:disabled { opacity: 1; cursor: default; filter: saturate(0.3) brightness(0.5); }
+
+    input[type="number"] {
+      width: 48px;
+      background: #222;
+      border: 1px solid #3a3a3a;
+      border-radius: 5px;
+      color: var(--text-main);
+      font-size: 11px;
+      padding: 3px 5px;
+      text-align: right;
+      outline: none;
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    input[type="number"]:focus { border-color: var(--accent-color); }
+    input[type="number"]:disabled { color: #888; border-color: #2a2a2a; background: #1a1a1a; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border-color);
+      margin: 6px 0;
+    }
+
+    .wave-selector {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 5px;
+      background: #1e1e1e;
+      padding: 4px;
+      border-radius: 7px;
+    }
+    .wave-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 7px 2px;
+      font-size: 11px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .wave-btn.active { background: var(--accent-color); color: #fff; }
+
+    button.action-btn {
+      width: 100%;
+      padding: 10px;
+      background: #252525;
+      color: #ccc;
+      border: 1px solid #383838;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    #pause-btn.paused  { background: var(--success-color); border-color: var(--success-color); color: #fff; }
+    #pause-btn.running { background: var(--danger-color);  border-color: var(--danger-color);  color: #fff; opacity: .85; }
+
+    canvas {
+      display: none;
+      transform-origin: center center;
+      cursor: grab;
+      image-rendering: pixelated;
+    }
+    canvas.grabbing { cursor: grabbing; }
+
+    #zoom-info {
+      position: absolute;
+      bottom: 16px; right: 16px;
+      background: rgba(0,0,0,.6);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      border: 1px solid #333;
+      pointer-events: none;
+    }
+    .hidden { display: none !important; }
+
+    .mini-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      width: 14px;
+      flex-shrink: 0;
+      text-align: center;
+    }
+
+    button.reset-btn {
+      background: none;
+      border: none;
+      color: #a89a30;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    button.reset-btn:hover { color: #ffe566; }
+  </style>
+</head>
+<body>
+
+<!-- LEFT PANEL: Adjustments -->
+<aside id="left-panel">
+
+  <div class="section-label">1. Base Image</div>
+
+  <div class="adj-body" style="margin-top:4px">
+    <div class="ctrl-row">
+      <div class="ctrl-head">
+        <label class="ctrl-label"><input type="checkbox" id="blur1-en"> Blur</label>
+        <button class="reset-btn" data-reset="blur1" title="Reset">↺</button><input type="number" id="blur1-num" min="0" max="20" step="0.5" value="0" disabled>
+      </div>
+      <input type="range" id="blur1" min="0" max="20" step="0.5" value="0" disabled>
+    </div>
+    <div class="ctrl-row">
+      <div class="ctrl-head">
+        <label class="ctrl-label"><input type="checkbox" id="sh1-en"> Shadows / Highlights</label>
+      </div>
+      <div class="ctrl-head">
+        <span class="mini-label">Sh</span>
+        <input type="range" id="shadows1" min="-1" max="1" step="0.01" value="0" disabled style="flex:1">
+        <button class="reset-btn" data-reset="shadows1" title="Reset">↺</button><input type="number" id="shadows1-num" min="-1" max="1" step="0.01" value="0" disabled>
+      </div>
+      <div class="ctrl-head">
+        <span class="mini-label">Hi</span>
+        <input type="range" id="highlights1" min="-1" max="1" step="0.01" value="0" disabled style="flex:1">
+        <button class="reset-btn" data-reset="highlights1" title="Reset">↺</button><input type="number" id="highlights1-num" min="-1" max="1" step="0.01" value="0" disabled>
+      </div>
+      <div class="ctrl-head" style="margin-top:2px">
+        <span class="mini-label" style="width:auto;font-size:9px;color:var(--text-dim)">Pre</span>
+        <input type="range" id="shpremix1" min="0" max="1" step="0.01" value="0.5" disabled style="flex:1">
+        <span class="mini-label" style="width:auto;font-size:9px;color:var(--text-dim)">Post</span>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="section-label">2. Overlay Image</div>
+
+  <div class="adj-body" style="margin-top:4px">
+    <div class="ctrl-row">
+      <div class="ctrl-head">
+        <label class="ctrl-label"><input type="checkbox" id="blur2-en"> Blur</label>
+        <button class="reset-btn" data-reset="blur2" title="Reset">↺</button><input type="number" id="blur2-num" min="0" max="20" step="0.5" value="0" disabled>
+      </div>
+      <input type="range" id="blur2" min="0" max="20" step="0.5" value="0" disabled>
+    </div>
+    <div class="ctrl-row">
+      <div class="ctrl-head">
+        <label class="ctrl-label"><input type="checkbox" id="sh2-en"> Shadows / Highlights</label>
+      </div>
+      <div class="ctrl-head">
+        <span class="mini-label">Sh</span>
+        <input type="range" id="shadows2" min="-1" max="1" step="0.01" value="0" disabled style="flex:1">
+        <button class="reset-btn" data-reset="shadows2" title="Reset">↺</button><input type="number" id="shadows2-num" min="-1" max="1" step="0.01" value="0" disabled>
+      </div>
+      <div class="ctrl-head">
+        <span class="mini-label">Hi</span>
+        <input type="range" id="highlights2" min="-1" max="1" step="0.01" value="0" disabled style="flex:1">
+        <button class="reset-btn" data-reset="highlights2" title="Reset">↺</button><input type="number" id="highlights2-num" min="-1" max="1" step="0.01" value="0" disabled>
+      </div>
+    </div>
+  </div>
+
+</aside>
+
+<main id="viewport">
+  <div id="zoom-info" class="hidden">zoom: 100%</div>
+  <canvas id="c"></canvas>
+</main>
+
+<!-- RIGHT SIDEBAR: Wave controls + Export -->
+<aside id="sidebar">
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+    <div id="drop-1" class="drop-area">Drop Base</div>
+    <div id="drop-2" class="drop-area">Drop Overlay</div>
+  </div>
+
+  <div class="ctrl-row" style="margin-bottom:7px">
+    <div class="ctrl-head">
+      <span class="ctrl-label">Wave Spacing</span>
+      <button class="reset-btn" data-reset="waveSpacing" title="Reset">↺</button><input type="number" id="waveSpacing-num" min="1" max="255" step="1" value="128">
+    </div>
+    <input type="range" id="waveSpacing" min="1" max="255" step="1" value="128">
+  </div>
+
+  <div class="ctrl-row" style="margin-bottom:7px">
+    <div class="ctrl-head">
+      <span class="ctrl-label">Total Frames</span>
+      <button class="reset-btn" data-reset="totalFrames" title="Reset">↺</button><input type="number" id="totalFrames-num" min="1" max="240" step="1" value="12" style="width:52px">
+    </div>
+    <input type="range" id="totalFrames" min="1" max="240" step="1" value="12">
+  </div>
+
+  <div class="ctrl-row" style="margin-bottom:7px">
+    <div class="ctrl-head">
+      <span class="ctrl-label">Frame Delay (ms)</span>
+      <button class="reset-btn" data-reset="frameDelay" title="Reset">↺</button><input type="number" id="frameDelay-num" min="20" max="100" step="10" value="80" style="width:52px">
+    </div>
+    <input type="range" id="frameDelay" min="20" max="100" step="10" value="80">
+  </div>
+
+  <div style="margin-bottom:7px">
+    <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:5px">Wave Type</div>
+    <div class="wave-selector">
+      <button class="wave-btn active" data-value="0">Saw</button>
+      <button class="wave-btn" data-value="1">Triangle</button>
+      <button class="wave-btn" data-value="2">Sine</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:16px;margin-bottom:7px;align-items:center">
+    <label class="ctrl-label" style="cursor:pointer">
+      <input type="checkbox" id="reverse"> Reverse
+    </label>
+    <label class="ctrl-label" style="cursor:pointer">
+      <input type="checkbox" id="threshold" checked> Threshold
+    </label>
+    <button class="reset-btn" data-reset="thresh" title="Reset">↺</button><input type="number" id="thresh-num" min="0" max="1" step="0.01" value="0.50" style="width:44px">
+  </div>
+  <input type="range" id="thresh-slider" min="0" max="1" step="0.01" value="0.50" style="margin-bottom:7px">
+
+  <div class="ctrl-row" style="margin-bottom:7px">
+    <div class="ctrl-head">
+      <label class="ctrl-label"><input type="checkbox" id="aa-en" checked> AA Smooth</label>
+      <button class="reset-btn" data-reset="aaWidth" title="Reset">↺</button><input type="number" id="aa-num" min="0.1" max="8" step="0.1" value="1.0" style="width:44px">
+    </div>
+    <input type="range" id="aa-slider" min="0.1" max="8" step="0.1" value="1.0">
+    <div style="display:flex;gap:5px;margin-top:4px" id="thresh-order-row">
+      <button class="wave-btn" id="thresh-after"  style="flex:1;font-size:10px;padding:5px 2px">Sonra ▼</button>
+      <button class="wave-btn active" id="thresh-before" style="flex:1;font-size:10px;padding:5px 2px">Önce ▲</button>
+    </div>
+  </div>
+
+  <hr class="divider">
+  <div class="section-label">Export GIF</div>
+
+  <div class="ctrl-row" style="margin-bottom:7px">
+    <div class="ctrl-head">
+      <span class="ctrl-label">Downscale</span>
+      <button class="reset-btn" data-reset="downscale" title="Reset">↺</button><input type="number" id="downscale-num" min="0.05" max="1" step="0.05" value="1" style="width:52px">
+    </div>
+    <input type="range" id="downscale" min="0.05" max="1" step="0.05" value="1">
+    <div id="downscale-size" style="font-size:10px;color:var(--text-dim);text-align:right;margin-top:2px">—</div>
+  </div>
+
+  <button id="export-gif-btn" class="action-btn" style="margin-top:2px">⬇ Export GIF</button>
+  <div id="export-progress" style="font-size:10px;color:var(--text-dim);text-align:center;margin-top:4px;min-height:14px"></div>
+
+  <hr class="divider">
+  <div class="btn-row">
+    <button id="pause-btn" class="action-btn running" style="margin-top:0">Pause</button>
+    <button id="reset-zoom" class="action-btn" style="margin-top:0">100%</button>
+  </div>
+</aside>
+
+<script>
+  const canvas      = document.getElementById("c");
+  const viewport    = document.getElementById("viewport");
+  const zoomInfo    = document.getElementById("zoom-info");
+  const pauseBtn    = document.getElementById("pause-btn");
+  const gl          = canvas.getContext("webgl", { antialias: false, depth: false, preserveDrawingBuffer: true });
+  gl.getExtension("OES_standard_derivatives");
+
+  const waveSpacingInput = document.getElementById("waveSpacing");
+  const waveSpacingNum   = document.getElementById("waveSpacing-num");
+  const totalFramesInput = document.getElementById("totalFrames");
+  const totalFramesNum   = document.getElementById("totalFrames-num");
+  const frameDelayInput  = document.getElementById("frameDelay");
+  const frameDelayNum    = document.getElementById("frameDelay-num");
+  const downscaleInput   = document.getElementById("downscale");
+  const downscaleNum     = document.getElementById("downscale-num");
+  const threshSlider = document.getElementById("thresh-slider");
+  const threshNum    = document.getElementById("thresh-num");
+  const threshCheck  = document.getElementById("threshold");
+  const aaEnCheck    = document.getElementById("aa-en");
+  const aaSlider     = document.getElementById("aa-slider");
+  const aaNum        = document.getElementById("aa-num");
+  let threshOrderVal = 1; // 1=önce(before), 0=sonra(after)
+  document.getElementById("thresh-before").addEventListener("click", () => {
+    threshOrderVal = 1;
+    document.getElementById("thresh-before").classList.add("active");
+    document.getElementById("thresh-after").classList.remove("active");
+  });
+  document.getElementById("thresh-after").addEventListener("click", () => {
+    threshOrderVal = 0;
+    document.getElementById("thresh-after").classList.add("active");
+    document.getElementById("thresh-before").classList.remove("active");
+  });
+  const reverseCheck = document.getElementById("reverse");
+  const waveButtons  = document.querySelectorAll(".wave-btn");
+
+  const blur1En = document.getElementById("blur1-en");
+  const blur1S  = document.getElementById("blur1");
+  const blur1N  = document.getElementById("blur1-num");
+  const sh1En   = document.getElementById("sh1-en");
+  const shPreMix1El = document.getElementById("shpremix1");
+  const sh1S    = document.getElementById("shadows1");
+  const sh1N    = document.getElementById("shadows1-num");
+  const hi1S    = document.getElementById("highlights1");
+  const hi1N    = document.getElementById("highlights1-num");
+
+  const blur2En = document.getElementById("blur2-en");
+  const blur2S  = document.getElementById("blur2");
+  const blur2N  = document.getElementById("blur2-num");
+  const sh2En   = document.getElementById("sh2-en");
+  const sh2S    = document.getElementById("shadows2");
+  const sh2N    = document.getElementById("shadows2-num");
+  const hi2S    = document.getElementById("highlights2");
+  const hi2N    = document.getElementById("highlights2-num");
+
+  // ── Slider <-> Number sync ──────────────────────────────────────────────────
+  function linkSliderNum(slider, numInput) {
+    const decimals = slider.step.includes(".") ? 2 : 0;
+    slider.addEventListener("input", () => {
+      numInput.value = parseFloat(slider.value).toFixed(decimals);
+    });
+    const apply = () => {
+      let v = parseFloat(numInput.value);
+      const mn = parseFloat(slider.min), mx = parseFloat(slider.max);
+      if (isNaN(v)) v = parseFloat(slider.value);
+      v = Math.max(mn, Math.min(mx, v));
+      numInput.value = v.toFixed(decimals);
+      slider.value   = v;
+    };
+    numInput.addEventListener("keydown", e => { if (e.key === "Enter") { apply(); numInput.blur(); } });
+    numInput.addEventListener("blur", apply);
+  }
+
+  linkSliderNum(waveSpacingInput, waveSpacingNum);
+  linkSliderNum(totalFramesInput, totalFramesNum);
+  linkSliderNum(frameDelayInput,  frameDelayNum);
+  linkSliderNum(downscaleInput,   downscaleNum);
+
+  const downscaleSize = document.getElementById("downscale-size");
+  function updateSizeLabel() {
+    if (!imgW || !imgH) { downscaleSize.textContent = "—"; return; }
+    const s = Math.min(1, Math.max(0.05, parseFloat(downscaleInput.value)));
+    downscaleSize.textContent = `${Math.max(1,Math.round(imgW*s))}×${Math.max(1,Math.round(imgH*s))}`;
+  }
+  downscaleInput.addEventListener("input", updateSizeLabel);
+  downscaleNum.addEventListener("input",   updateSizeLabel);
+  linkSliderNum(threshSlider, threshNum);
+  linkSliderNum(aaSlider, aaNum);
+  linkSliderNum(blur1S, blur1N);
+  linkSliderNum(blur2S, blur2N);
+  linkSliderNum(sh1S,  sh1N);
+  linkSliderNum(hi1S,  hi1N);
+  linkSliderNum(sh2S,  sh2N);
+  linkSliderNum(hi2S,  hi2N);
+
+  // ── Toggle enables ──────────────────────────────────────────────────────────
+  function wireToggle(checkbox, ...inputs) {
+    const update = () => inputs.forEach(el => { el.disabled = !checkbox.checked; });
+    checkbox.addEventListener("change", update);
+    update();
+  }
+  wireToggle(blur1En, blur1S, blur1N);
+  wireToggle(blur2En, blur2S, blur2N);
+  wireToggle(sh1En,   sh1S, sh1N, hi1S, hi1N, shPreMix1El);
+  wireToggle(sh2En,   sh2S, sh2N, hi2S, hi2N);
+
+  function updateThreshVis() {
+    threshSlider.disabled = !threshCheck.checked;
+    threshNum.disabled    = !threshCheck.checked;
+    aaSlider.disabled     = !threshCheck.checked || !aaEnCheck.checked;
+    aaNum.disabled        = !threshCheck.checked || !aaEnCheck.checked;
+    aaEnCheck.disabled    = !threshCheck.checked;
+    document.getElementById("thresh-order-row").style.opacity = threshCheck.checked ? "1" : "0.35";
+    document.getElementById("thresh-order-row").style.pointerEvents = threshCheck.checked ? "" : "none";
+  }
+  threshCheck.addEventListener("change", updateThreshVis);
+  aaEnCheck.addEventListener("change",   updateThreshVis);
+  updateThreshVis();
+
+  // ── Wave type ───────────────────────────────────────────────────────────────
+  let currentWaveType = 0;
+  waveButtons.forEach(btn => {
+    btn.onclick = () => {
+      waveButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentWaveType = parseInt(btn.dataset.value);
+    };
+  });
+
+  // ── Pause ───────────────────────────────────────────────────────────────────
+  let isPaused = false;
+  pauseBtn.onclick = () => {
+    isPaused = !isPaused;
+    pauseBtn.textContent = isPaused ? "Play Animation" : "Pause Animation";
+    pauseBtn.className   = isPaused ? "action-btn paused" : "action-btn running";
+  };
+
+  // ── Pan / Zoom ──────────────────────────────────────────────────────────────
+  let scale = 1, offsetX = 0, offsetY = 0, imgW = 0, imgH = 0;
+  let baseLoaded = false, overlayLoaded = false;
+  let texSize1 = [1, 1], texSize2 = [1, 1];
+
+  function applyTransform() {
+    canvas.style.transform = `translate(${offsetX}px,${offsetY}px) scale(${scale})`;
+    zoomInfo.textContent   = `zoom: ${Math.round(scale * 100)}%`;
+  }
+
+  document.getElementById("reset-zoom").onclick = () => {
+    scale = 1; offsetX = 0; offsetY = 0; applyTransform();
+  };
+
+  viewport.addEventListener("wheel", e => {
+    e.preventDefault();
+    const d = e.deltaY < 0 ? 1.1 : 0.9;
+    const ns = Math.max(0.01, Math.min(50, scale * d));
+    const r  = viewport.getBoundingClientRect();
+    const mx = e.clientX - (r.left + r.width / 2);
+    const my = e.clientY - (r.top  + r.height / 2);
+    offsetX = mx + (offsetX - mx) * (ns / scale);
+    offsetY = my + (offsetY - my) * (ns / scale);
+    scale   = ns;
+    applyTransform();
+  }, { passive: false });
+
+  let dragging = false, dsx, dsy, dox, doy;
+  viewport.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    dragging = true; dsx = e.clientX; dsy = e.clientY; dox = offsetX; doy = offsetY;
+    canvas.classList.add("grabbing");
+  });
+  window.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    offsetX = dox + (e.clientX - dsx);
+    offsetY = doy + (e.clientY - dsy);
+    applyTransform();
+  });
+  window.addEventListener("mouseup", () => { dragging = false; canvas.classList.remove("grabbing"); });
+
+  // ── Shaders ─────────────────────────────────────────────────────────────────
+  const vs = `
+attribute vec2 p;
+varying vec2 uv;
+void main(){ uv = (p + 1.0) * 0.5; gl_Position = vec4(p, 0.0, 1.0); }`;
+
+  const fs = `
+#extension GL_OES_standard_derivatives : enable
+precision mediump float;
+
+uniform sampler2D tex;
+uniform sampler2D tex2;
+uniform float time;
+uniform float waveSpacing;
+uniform int   waveType;
+uniform int   thresholdEnabled;
+uniform float thresholdVal;
+uniform int   aaEnabled;
+uniform float aaWidth;
+uniform int   threshOrder; // 0 = threshold sonra (after blend), 1 = threshold önce (before blend)
+uniform int   hasOverlay;
+
+uniform int   blurEnabled1;
+uniform float blurRadius1;
+uniform vec2  texSize1;
+uniform float shadows1;
+uniform float highlights1;
+uniform int   sh1Enabled;
+uniform float shPreMix1;
+
+uniform int   blurEnabled2;
+uniform float blurRadius2;
+uniform vec2  texSize2;
+uniform float shadows2;
+uniform float highlights2;
+uniform int   sh2Enabled;
+
+varying vec2 uv;
+
+float gaussBlur(sampler2D t, vec2 coord, vec2 px) {
+  float sum = 0.0, total = 0.0;
+  for (int ix = -2; ix <= 2; ix++) {
+    for (int iy = -2; iy <= 2; iy++) {
+      float fx = float(ix), fy = float(iy);
+      float w  = exp(-(fx*fx + fy*fy) * 0.5);
+      sum   += texture2D(t, coord + vec2(fx, fy) * px).r * w;
+      total += w;
+    }
+  }
+  return sum / total;
+}
+
+float applySH(float v, float sh, float hi) {
+  v += sh * pow(1.0 - v, 2.0);
+  v += hi * pow(v, 2.0);
+  return clamp(v, 0.0, 1.0);
+}
+
+void main() {
+  float baseR;
+  if (blurEnabled1 == 1)
+    baseR = gaussBlur(tex, uv, (1.0 / texSize1) * blurRadius1);
+  else
+    baseR = texture2D(tex, uv).r;
+
+  // S/H'ın shPreMix1 oranı dalga öncesi (tonal banding etkisi),
+  // kalan (1-shPreMix1) oranı dalga sonrası (kontrast etkisi)
+  if (sh1Enabled == 1)
+    baseR = applySH(baseR, shadows1 * shPreMix1, highlights1 * shPreMix1);
+
+  float t = mod(baseR * 255.0 / max(waveSpacing, 0.001) + time, 1.0);
+  float f = fract(t);
+  float waveVal = 0.0;
+  if      (waveType == 0) waveVal = f;
+  else if (waveType == 1) waveVal = 1.0 - abs(2.0 * f - 1.0);
+  else                    waveVal = 0.5 + 0.5 * sin(f * 6.28318);
+
+  float finalVal = waveVal;
+
+  // Dalga sonrası S/H: kalan (1-shPreMix1) oranı
+  if (sh1Enabled == 1)
+    finalVal = applySH(finalVal, shadows1 * (1.0 - shPreMix1), highlights1 * (1.0 - shPreMix1));
+
+  // Threshold önce: waveVal'a uygula, sonra overlay blend
+  if (thresholdEnabled == 1 && threshOrder == 1) {
+    if (aaEnabled == 1) {
+      float fw = fwidth(finalVal) * aaWidth;
+      finalVal = smoothstep(thresholdVal - fw, thresholdVal + fw, finalVal);
+    } else {
+      finalVal = finalVal >= thresholdVal ? 1.0 : 0.0;
+    }
+  }
+
+  if (hasOverlay == 1) {
+    float overlayR;
+    if (blurEnabled2 == 1)
+      overlayR = gaussBlur(tex2, uv, (1.0 / texSize2) * blurRadius2);
+    else
+      overlayR = texture2D(tex2, uv).r;
+    if (sh2Enabled == 1)
+      overlayR = applySH(overlayR, shadows2, highlights2);
+
+    // Overlay'e de threshold önce uygula
+    if (thresholdEnabled == 1 && threshOrder == 1) {
+      if (aaEnabled == 1) {
+        float fw2 = fwidth(overlayR) * aaWidth;
+        overlayR = smoothstep(thresholdVal - fw2, thresholdVal + fw2, overlayR);
+      } else {
+        overlayR = overlayR >= thresholdVal ? 1.0 : 0.0;
+      }
+    }
+
+    finalVal = (finalVal + overlayR) * 0.5;
+  }
+
+  // Threshold sonra: blend'den sonra uygula
+  if (thresholdEnabled == 1 && threshOrder == 0) {
+    if (aaEnabled == 1) {
+      float fw = fwidth(finalVal) * aaWidth;
+      finalVal = smoothstep(thresholdVal - fw, thresholdVal + fw, finalVal);
+    } else {
+      finalVal = finalVal >= thresholdVal ? 1.0 : 0.0;
+    }
+  }
+
+  gl_FragColor = vec4(vec3(finalVal), 1.0);
+}`;
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+
+  const glProg = gl.createProgram();
+  gl.attachShader(glProg, compile(gl.VERTEX_SHADER,   vs));
+  gl.attachShader(glProg, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(glProg); gl.useProgram(glProg);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const pLoc = gl.getAttribLocation(glProg, "p");
+  gl.enableVertexAttribArray(pLoc);
+  gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+
+  function createTex() {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128,128,128,255]));
+    return t;
+  }
+  const tex1 = createTex(), tex2 = createTex();
+
+  const U = n => gl.getUniformLocation(glProg, n);
+  const uTime    = U("time"),    uWaveSpacing = U("waveSpacing"), uWave = U("waveType");
+  const uThresh  = U("thresholdEnabled"),  uThreshV = U("thresholdVal");
+  const uAaEn   = U("aaEnabled"), uAaW = U("aaWidth"), uThreshOrder = U("threshOrder");
+  const uOverlay = U("hasOverlay"), uTex1 = U("tex"), uTex2 = U("tex2");
+  const uBlurEn1 = U("blurEnabled1"), uBlurR1 = U("blurRadius1"), uTexSz1 = U("texSize1");
+  const uSHEn1   = U("sh1Enabled"),   uSh1 = U("shadows1"),    uHi1 = U("highlights1");
+  const uShPreMix1 = U("shPreMix1");
+  const uBlurEn2 = U("blurEnabled2"), uBlurR2 = U("blurRadius2"), uTexSz2 = U("texSize2");
+  const uSHEn2   = U("sh2Enabled"),   uSh2 = U("shadows2"),    uHi2 = U("highlights2");
+
+  // Start immediately
+  let currentFrame = 0;
+  let lastStepTime = 0;
+
+  (function init() {
+    const vw = viewport.clientWidth  || window.innerWidth  - 290 - 230;
+    const vh = viewport.clientHeight || window.innerHeight;
+    canvas.width = vw; canvas.height = vh;
+    gl.viewport(0, 0, vw, vh);
+    canvas.style.display = "block";
+    zoomInfo.classList.remove("hidden");
+    lastStepTime = performance.now();
+  })();
+
+  // ── Drop handling ───────────────────────────────────────────────────────────
+  function handleDrop(id, cb) {
+    const el = document.getElementById(id);
+    el.addEventListener("dragover",  e => { e.preventDefault(); el.classList.add("active"); });
+    el.addEventListener("dragleave", ()  => el.classList.remove("active"));
+    el.addEventListener("drop", e => {
+      e.preventDefault(); el.classList.remove("active");
+      const file = e.dataTransfer.files[0];
+      if (!file || !file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => { el.classList.add("has-image"); cb(img); };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  handleDrop("drop-1", img => {
+    baseLoaded = true;
+    imgW = img.naturalWidth; imgH = img.naturalHeight;
+    texSize1 = [imgW, imgH];
+    canvas.width = imgW; canvas.height = imgH;
+    gl.viewport(0, 0, imgW, imgH);
+    updateSizeLabel();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex1);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    const pad = 60;
+    scale   = Math.min((viewport.clientWidth - pad) / imgW, (viewport.clientHeight - pad) / imgH, 1);
+    offsetX = 0; offsetY = 0;
+    applyTransform();
+  });
+
+  handleDrop("drop-2", img => {
+    overlayLoaded = true;
+    texSize2 = [img.naturalWidth, img.naturalHeight];
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tex2);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  });
+
+  // ── Render loop (stepped, mirrors GIF frames) ─────────────────────────────
+  function draw(now) {
+    if (!baseLoaded) { lastStepTime = now; requestAnimationFrame(draw); return; }
+
+    if (!isPaused) {
+      const N     = Math.max(1, parseInt(totalFramesNum.value) || 12);
+      const delay = Math.max(1,  parseInt(frameDelayNum.value)  || 80);
+      if (now - lastStepTime >= delay) {
+        lastStepTime = now;
+        currentFrame = (currentFrame + (reverseCheck.checked ? -1 : 1) + N) % N;
+      }
+    } else {
+      lastStepTime = now;
+    }
+
+    const N = Math.max(1, parseInt(totalFramesNum.value) || 12);
+    const t = currentFrame / N;
+
+    gl.useProgram(glProg);
+    gl.uniform1f(uTime,       t);
+    gl.uniform1f(uWaveSpacing, parseFloat(waveSpacingInput.value));
+    gl.uniform1i(uWave,       currentWaveType);
+    gl.uniform1i(uThresh,     threshCheck.checked ? 1 : 0);
+    gl.uniform1f(uThreshV,    parseFloat(threshSlider.value));
+    gl.uniform1i(uAaEn,       aaEnCheck.checked ? 1 : 0);
+    gl.uniform1f(uAaW,        parseFloat(aaSlider.value));
+    gl.uniform1i(uThreshOrder, threshOrderVal);
+    gl.uniform1i(uOverlay,    overlayLoaded ? 1 : 0);
+    gl.uniform1i(uTex1, 0);   gl.uniform1i(uTex2, 1);
+
+    gl.uniform1i(uBlurEn1, blur1En.checked ? 1 : 0);
+    gl.uniform1f(uBlurR1,  parseFloat(blur1S.value));
+    gl.uniform2f(uTexSz1,  texSize1[0], texSize1[1]);
+    gl.uniform1i(uSHEn1,   sh1En.checked ? 1 : 0);
+    gl.uniform1f(uSh1,     parseFloat(sh1S.value));
+    gl.uniform1f(uHi1,     parseFloat(hi1S.value));
+    gl.uniform1f(uShPreMix1, parseFloat(shPreMix1El.value));
+
+    gl.uniform1i(uBlurEn2, blur2En.checked ? 1 : 0);
+    gl.uniform1f(uBlurR2,  parseFloat(blur2S.value));
+    gl.uniform2f(uTexSz2,  texSize2[0], texSize2[1]);
+    gl.uniform1i(uSHEn2,   sh2En.checked ? 1 : 0);
+    gl.uniform1f(uSh2,     parseFloat(sh2S.value));
+    gl.uniform1f(uHi2,     parseFloat(hi2S.value));
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(draw);
+  }
+
+  // ── Reset buttons ────────────────────────────────────────────────────────────
+  const resetDefaults = {
+    blur1: 0, shadows1: 0, highlights1: 0,
+    blur2: 0, shadows2: 0, highlights2: 0,
+    waveSpacing: 128, totalFrames: 12, frameDelay: 80, downscale: 1, thresh: 0.50, aaWidth: 1.0
+  };
+  const resetTargets = {
+    blur1:       [blur1S, blur1N],
+    shadows1:    [sh1S, sh1N],
+    highlights1: [hi1S, hi1N],
+    blur2:       [blur2S, blur2N],
+    shadows2:    [sh2S, sh2N],
+    highlights2: [hi2S, hi2N],
+    waveSpacing: [waveSpacingInput, waveSpacingNum],
+    totalFrames: [totalFramesInput, totalFramesNum],
+    frameDelay:  [frameDelayInput,  frameDelayNum],
+    downscale:   [downscaleInput,   downscaleNum],
+    thresh:      [threshSlider, threshNum],
+    aaWidth:     [aaSlider,     aaNum]
+  };
+  document.querySelectorAll("button.reset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.reset;
+      const val = resetDefaults[key];
+      const [slider, numEl] = resetTargets[key];
+      const decimals = slider.step.includes(".") ? 2 : 0;
+      slider.value = val;
+      numEl.value  = val.toFixed(decimals);
+    });
+  });
+
+  requestAnimationFrame(draw);
+
+  // ── GIF Export ───────────────────────────────────────────────────────────────
+  document.getElementById("export-gif-btn").addEventListener("click", async () => {
+    if (!baseLoaded) { alert("Base image yüklü değil."); return; }
+    const N      = Math.max(2, parseInt(totalFramesNum.value) || 12);
+    const delay  = Math.max(20, parseInt(frameDelayNum.value) || 80);
+    const prog   = document.getElementById("export-progress");
+    const btn    = document.getElementById("export-gif-btn");
+
+    btn.disabled = true;
+    prog.textContent = "Hazırlanıyor...";
+
+    const savedPaused = isPaused;
+    isPaused = true;
+    await tick();
+
+    function setUniforms(tVal) {
+      gl.useProgram(glProg);
+      gl.uniform1f(uTime,        tVal);
+      gl.uniform1f(uWaveSpacing, parseFloat(waveSpacingInput.value));
+      gl.uniform1i(uWave,        currentWaveType);
+      gl.uniform1i(uThresh,      threshCheck.checked ? 1 : 0);
+      gl.uniform1f(uThreshV,     parseFloat(threshSlider.value));
+      gl.uniform1i(uAaEn,        aaEnCheck.checked ? 1 : 0);
+      gl.uniform1f(uAaW,         parseFloat(aaSlider.value));
+      gl.uniform1i(uThreshOrder, threshOrderVal);
+      gl.uniform1i(uOverlay,     overlayLoaded ? 1 : 0);
+      gl.uniform1i(uTex1, 0); gl.uniform1i(uTex2, 1);
+      gl.uniform1i(uBlurEn1, blur1En.checked ? 1 : 0);
+      gl.uniform1f(uBlurR1,  parseFloat(blur1S.value));
+      gl.uniform2f(uTexSz1,  texSize1[0], texSize1[1]);
+      gl.uniform1i(uSHEn1,   sh1En.checked ? 1 : 0);
+      gl.uniform1f(uSh1,     parseFloat(sh1S.value));
+      gl.uniform1f(uHi1,     parseFloat(hi1S.value));
+      gl.uniform1f(uShPreMix1, parseFloat(shPreMix1El.value));
+      gl.uniform1i(uBlurEn2, blur2En.checked ? 1 : 0);
+      gl.uniform1f(uBlurR2,  parseFloat(blur2S.value));
+      gl.uniform2f(uTexSz2,  texSize2[0], texSize2[1]);
+      gl.uniform1i(uSHEn2,   sh2En.checked ? 1 : 0);
+      gl.uniform1f(uSh2,     parseFloat(sh2S.value));
+      gl.uniform1f(uHi2,     parseFloat(hi2S.value));
+    }
+
+    const frames = [];
+    const W = imgW, H = imgH;
+    const scale  = Math.min(1, Math.max(0.05, parseFloat(downscaleInput.value)));
+    const outW = Math.max(1, Math.round(W * scale));
+    const outH = Math.max(1, Math.round(H * scale));
+
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      setUniforms(t);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      const rgba = new Uint8Array(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+
+      // Flip Y and extract grayscale
+      const gray = new Uint8Array(W * H);
+      for (let y = 0; y < H; y++) {
+        const srcY = H - 1 - y;
+        for (let x = 0; x < W; x++) {
+          gray[y * W + x] = rgba[(srcY * W + x) * 4];
+        }
+      }
+
+      frames.push(scale < 1 ? bicubicDownscale(gray, W, H, outW, outH) : gray);
+
+      prog.textContent = `Render ${i + 1}/${N}`;
+      if (i % 6 === 5) await tick();
+    }
+
+    if (reverseCheck.checked) frames.reverse();
+
+    prog.textContent = "GIF kodlanıyor...";
+    await tick();
+
+    const gifBytes = buildGIF(frames, outW, outH, delay);
+    const blob = new Blob([gifBytes], { type: "image/gif" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "wave-cycle.gif";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+
+    prog.textContent = `✓ ${N} kare, ${outW}×${outH}px`;
+    btn.disabled = false;
+
+    isPaused = savedPaused;
+  });
+
+  function tick() { return new Promise(r => setTimeout(r, 0)); }
+
+  // ── Area-averaging downscale (grayscale Uint8Array) ──────────────────────────
+  // Her çıktı pikseli, karşılık geldiği kaynak dikdörtgeninin ağırlıklı ortalaması.
+  // ffmpeg scale=flags=area ile aynı mantık → dithering gerekmez, gürültü yok.
+  function bicubicDownscale(src, srcW, srcH, dstW, dstH) {
+    const scaleX = srcW / dstW;
+    const scaleY = srcH / dstH;
+    const dst = new Uint8Array(dstW * dstH);
+
+    for (let dy = 0; dy < dstH; dy++) {
+      const y0 = dy * scaleY;
+      const y1 = y0 + scaleY;
+      const iy0 = Math.floor(y0);
+      const iy1 = Math.ceil(y1);
+
+      for (let dx = 0; dx < dstW; dx++) {
+        const x0 = dx * scaleX;
+        const x1 = x0 + scaleX;
+        const ix0 = Math.floor(x0);
+        const ix1 = Math.ceil(x1);
+
+        let sum = 0, wTotal = 0;
+        for (let iy = iy0; iy < iy1; iy++) {
+          const wy = Math.min(iy + 1, y1) - Math.max(iy, y0);
+          const sy = Math.max(0, Math.min(srcH - 1, iy));
+          for (let ix = ix0; ix < ix1; ix++) {
+            const wx = Math.min(ix + 1, x1) - Math.max(ix, x0);
+            const sx = Math.max(0, Math.min(srcW - 1, ix));
+            const w  = wx * wy;
+            sum    += src[sy * srcW + sx] * w;
+            wTotal += w;
+          }
+        }
+        dst[dy * dstW + dx] = Math.round(sum / wTotal);
+      }
+    }
+    return dst;
+  }
+
+  // ── GIF89a encoder (grayscale, looping) ──────────────────────────────────────
+  function buildGIF(frames, width, height, delayMs) {
+    const out = [];
+    const u8  = b  => out.push(b & 0xFF);
+    const u16 = n  => { out.push(n & 0xFF, (n >> 8) & 0xFF); };
+    const txt = s  => { for (const c of s) out.push(c.charCodeAt(0)); };
+    const arr = a  => { for (const b of a) out.push(b); };
+
+    // Header
+    txt("GIF89a");
+    u16(width); u16(height);
+    u8(0xF7);   // Global CT present, 8-bit color depth, 256 entries
+    u8(0); u8(0); // BG index, pixel aspect
+
+    // Global Color Table: grayscale ramp
+    for (let i = 0; i < 256; i++) { u8(i); u8(i); u8(i); }
+
+    // Netscape 2.0 Application Extension → infinite loop
+    arr([0x21, 0xFF, 0x0B]);
+    txt("NETSCAPE2.0");
+    arr([0x03, 0x01, 0x00, 0x00, 0x00]); // loop count 0 = ∞
+
+    const delayCentisec = Math.round(delayMs / 10);
+
+    for (const frame of frames) {
+      // Graphic Control Extension
+      arr([0x21, 0xF9, 0x04, 0x00]);
+      u16(delayCentisec);
+      u8(0x00); u8(0x00); // no transparency, block terminator
+
+      // Image Descriptor
+      u8(0x2C);
+      u16(0); u16(0); u16(width); u16(height);
+      u8(0x00); // no local CT, not interlaced
+
+      // LZW Image Data (min code size 8)
+      u8(0x08);
+      const lzw = lzwCompress(frame, 8);
+      for (let i = 0; i < lzw.length; i += 255) {
+        const sub = lzw.slice(i, Math.min(i + 255, lzw.length));
+        u8(sub.length);
+        arr(sub);
+      }
+      u8(0x00); // sub-block terminator
+    }
+
+    u8(0x3B); // GIF trailer
+    return new Uint8Array(out);
+  }
+
+  function lzwCompress(data, minCodeSize) {
+    const clearCode = 1 << minCodeSize;
+    const eoiCode   = clearCode + 1;
+    let codeSize    = minCodeSize + 1;
+    let nextCode    = eoiCode + 1;
+
+    const bits = [];
+    const write = code => {
+      for (let i = 0; i < codeSize; i++) bits.push((code >> i) & 1);
+    };
+
+    let table = new Map();
+    const initTable = () => {
+      table.clear();
+      for (let i = 0; i < clearCode; i++) table.set(`${i}`, i);
+      codeSize = minCodeSize + 1;
+      nextCode  = eoiCode + 1;
+    };
+
+    initTable();
+    write(clearCode);
+
+    let prefix = `${data[0]}`;
+
+    for (let i = 1; i < data.length; i++) {
+      const combined = prefix + "," + data[i];
+      if (table.has(combined)) {
+        prefix = combined;
+      } else {
+        write(table.get(prefix));
+        if (nextCode === 4096) {
+          write(clearCode);
+          initTable();
+        } else {
+          table.set(combined, nextCode++);
+          if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
+        }
+        prefix = `${data[i]}`;
+      }
+    }
+    write(table.get(prefix));
+    write(eoiCode);
+
+    // Pack bits LSB-first into bytes
+    const out = [];
+    for (let i = 0; i < bits.length; i += 8) {
+      let b = 0;
+      for (let j = 0; j < 8; j++) b |= (bits[i + j] || 0) << j;
+      out.push(b);
+    }
+    return out;
+  }
+</script>
+</body>
+</html>
