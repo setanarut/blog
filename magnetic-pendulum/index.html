@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Magnetic Pendulum WebGPU</title>
+    <title>Optimized Magnetic Pendulum</title>
     <style>
         body { 
             margin: 0; 
@@ -39,10 +39,24 @@
         }
         canvas { 
             display: block; 
+            position: absolute;
+            top: 0;
+            left: 0;
         }
         h1 { margin: 0 0 10px 0; font-size: 20px; color: #fff; letter-spacing: -0.5px; }
         label { display: block; margin-bottom: 8px; font-size: 13px; color: #aaa; }
         input[type="range"] { width: 100%; cursor: pointer; margin-bottom: 24px; accent-color: #444; }
+        button {
+            background: #222;
+            color: white;
+            border: 1px solid #444;
+            padding: 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+        button:hover { background: #333; }
         .hint { font-size: 12px; opacity: 0.6; line-height: 1.6; margin-top: auto; border-top: 1px solid #222; padding-top: 20px; }
         .error-msg { color: #ff4444; font-size: 14px; display: none; }
     </style>
@@ -50,22 +64,24 @@
 <body>
     <div class="sidebar">
         <h1>Magnetic Pendulum</h1>
-        <p id="gpu-error" class="error-msg">WebGPU is not supported in your browser.</p>
+        <p id="gpu-error" class="error-msg">WebGPU is not supported.</p>
         
         <label id="resLabel">Resolution: 512x512</label>
         <input type="range" id="resSlider" min="128" max="1024" value="512" step="1">
         
+        <button id="toggleAnim">Hide Pendulum Animation</button>
+        
         <div class="hint">
-            • Powered by WebGPU for maximum performance.<br><br>
-            • Drag magnets to rearrange the field.<br><br>
-            • Click the view to launch a single pendulum.<br><br>
-            • Pendulum vanishes upon reaching a target.
+            • Shader only runs once when magnets move.<br><br>
+            • Pendulum is drawn on a separate 2D canvas.<br><br>
+            • Click to launch pendulum.
         </div>
     </div>
     
     <div class="main-view">
         <div class="canvas-container" id="container">
             <canvas id="gpuCanvas"></canvas>
+            <canvas id="uiCanvas"></canvas>
         </div>
     </div>
 
@@ -77,7 +93,6 @@
                 m2: vec2<f32>,
                 m3: vec2<f32>,
             };
-
             @group(0) @binding(0) var<uniform> ui: Uniforms;
 
             struct VertexOutput {
@@ -87,10 +102,7 @@
 
             @vertex
             fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
-                var pos = array<vec2<f32>, 4>(
-                    vec2(-1.0, -1.0), vec2(1.0, -1.0),
-                    vec2(-1.0, 1.0), vec2(1.0, 1.0)
-                );
+                var pos = array<vec2<f32>, 4>(vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
                 var out: VertexOutput;
                 out.pos = vec4<f32>(pos[idx], 0.0, 1.0);
                 out.uv = pos[idx];
@@ -101,8 +113,7 @@
             fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let aspect = ui.res.x / ui.res.y;
                 var coord = in.uv;
-                if (aspect > 1.0) { coord.x *= aspect; } 
-                else { coord.y /= aspect; }
+                if (aspect > 1.0) { coord.x *= aspect; } else { coord.y /= aspect; }
                 
                 var p = coord * 2.0;
                 var v = vec2<f32>(0.0);
@@ -113,17 +124,13 @@
 
                 for (var i = 0; i < 300; i++) {
                     let f_friction = -0.25 * p - 0.07 * v;
-                    
                     let d1 = pow(dot(p - ui.m1, p - ui.m1) + h*h, 1.5);
                     let d2 = pow(dot(p - ui.m2, p - ui.m2) + h*h, 1.5);
                     let d3 = pow(dot(p - ui.m3, p - ui.m3) + h*h, 1.5);
-
                     let f = f_friction + (ui.m1 - p)/d1 + (ui.m2 - p)/d2 + (ui.m3 - p)/d3;
-                    
                     v += f * dt;
                     p += v * dt;
                     steps += 1.0;
-
                     if (dot(v, v) < 0.001) {
                         if (length(p - ui.m1) < 0.2) { settled = 1; break; }
                         if (length(p - ui.m2) < 0.2) { settled = 2; break; }
@@ -143,7 +150,6 @@
                 if (settled == 1) { col = vec3(1.0, 0.2, 0.2); }
                 else if (settled == 2) { col = vec3(0.2, 1.0, 0.2); }
                 else { col = vec3(0.2, 0.2, 1.0); }
-
                 return vec4<f32>(col * shade, 1.0);
             }
         `;
@@ -151,6 +157,8 @@
         let magnets = [{x: 0, y: 0.6}, {x: 0.5, y: -0.4}, {x: -0.5, y: -0.4}];
         let activePendulum = null;
         let draggingIdx = -1;
+        let needsUpdate = true;
+        let showAnim = true;
 
         async function init() {
             if (!navigator.gpu) {
@@ -161,9 +169,11 @@
             const adapter = await navigator.gpu.requestAdapter();
             const device = await adapter.requestDevice();
             const canvas = document.getElementById('gpuCanvas');
+            const uiCanvas = document.getElementById('uiCanvas');
             const context = canvas.getContext('webgpu');
+            const uctx = uiCanvas.getContext('2d');
             const resSlider = document.getElementById('resSlider');
-            const resLabel = document.getElementById('resLabel');
+            const toggleBtn = document.getElementById('toggleAnim');
 
             const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
             context.configure({ device, format: presentationFormat, alphaMode: 'premultiplied' });
@@ -181,7 +191,7 @@
             });
 
             const uniformBuffer = device.createBuffer({
-                size: 64, // 2+2+2+2 float32 (8 * 8 bytes padding etc)
+                size: 64,
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -190,46 +200,50 @@
                 entries: [{ binding: 0, resource: { buffer: uniformBuffer } }]
             });
 
-            const overlay = document.createElement('canvas');
-            overlay.style.position = 'absolute';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.pointerEvents = 'none';
-            document.getElementById('container').appendChild(overlay);
-            const octx = overlay.getContext('2d');
-
             function updateSize() {
                 const val = parseInt(resSlider.value);
+                const container = document.getElementById('container');
+                container.style.width = val + 'px';
+                container.style.height = val + 'px';
+                
                 canvas.width = val;
                 canvas.height = val;
                 canvas.style.width = val + 'px';
                 canvas.style.height = val + 'px';
-                overlay.width = val;
-                overlay.height = val;
-                overlay.style.width = val + 'px';
-                overlay.style.height = val + 'px';
-                resLabel.innerText = `Resolution: ${val}x${val}`;
+                
+                uiCanvas.width = val;
+                uiCanvas.height = val;
+                uiCanvas.style.width = val + 'px';
+                uiCanvas.style.height = val + 'px';
+                
+                document.getElementById('resLabel').innerText = `Resolution: ${val}x${val}`;
+                needsUpdate = true;
             }
 
             resSlider.addEventListener('input', updateSize);
+            toggleBtn.addEventListener('click', () => {
+                showAnim = !showAnim;
+                toggleBtn.innerText = showAnim ? "Hide Pendulum Animation" : "Show Pendulum Animation";
+            });
             updateSize();
 
             function getMousePos(e) {
-                const rect = canvas.getBoundingClientRect();
+                const rect = uiCanvas.getBoundingClientRect();
                 const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
                 const y = (1 - (e.clientY - rect.top) / rect.height) * 2 - 1;
-                return { x: x * 1.0, y: y * 1.0 };
+                return { x, y };
             }
 
-            canvas.addEventListener('mousedown', (e) => {
+            uiCanvas.addEventListener('mousedown', (e) => {
                 const m = getMousePos(e);
                 let hit = -1;
                 magnets.forEach((mag, i) => {
                     if (Math.hypot(mag.x - m.x, mag.y - m.y) < 0.15) hit = i;
                 });
 
-                if (hit !== -1) { draggingIdx = hit; } 
-                else {
+                if (hit !== -1) { 
+                    draggingIdx = hit; 
+                } else {
                     activePendulum = {
                         p: { x: m.x, y: m.y },
                         v: { x: 0, y: 0 },
@@ -242,11 +256,13 @@
                 if (draggingIdx !== -1) {
                     const m = getMousePos(e);
                     magnets[draggingIdx] = { x: m.x, y: m.y };
+                    needsUpdate = true;
                 }
             });
             window.addEventListener('mouseup', () => draggingIdx = -1);
 
-            function frame() {
+            function drawBackground() {
+                if (!needsUpdate) return;
                 const uniformData = new Float32Array([
                     canvas.width, canvas.height,
                     magnets[0].x, magnets[0].y,
@@ -269,10 +285,7 @@
                 passEncoder.draw(4);
                 passEncoder.end();
                 device.queue.submit([commandEncoder.finish()]);
-
-                updatePhysics();
-                drawOverlay();
-                requestAnimationFrame(frame);
+                needsUpdate = false;
             }
 
             function updatePhysics() {
@@ -306,46 +319,49 @@
                 }
             }
 
-            function drawOverlay() {
-                octx.clearRect(0, 0, overlay.width, overlay.height);
-                const w = overlay.width;
-                const h = overlay.height;
-
-                const toScreen = (wx, wy) => ({
-                    x: (wx + 1) * 0.5 * w,
-                    y: (1 - (wy + 1) * 0.5) * h
-                });
+            function drawUI() {
+                uctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
+                const w = uiCanvas.width;
+                const h = uiCanvas.height;
+                const toScreen = (wx, wy) => ({ x: (wx + 1) * 0.5 * w, y: (1 - (wy + 1) * 0.5) * h });
 
                 const colors = ['#ff4b2b', '#1d976c', '#2193b0'];
                 magnets.forEach((m, i) => {
                     const pos = toScreen(m.x, m.y);
-                    octx.fillStyle = colors[i];
-                    octx.beginPath();
-                    octx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
-                    octx.fill();
-                    octx.strokeStyle = '#fff';
-                    octx.lineWidth = 2;
-                    octx.stroke();
+                    uctx.fillStyle = colors[i];
+                    uctx.beginPath();
+                    uctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+                    uctx.fill();
+                    uctx.strokeStyle = '#fff';
+                    uctx.lineWidth = 2;
+                    uctx.stroke();
                 });
 
-                if (activePendulum) {
-                    octx.beginPath();
-                    octx.strokeStyle = 'rgba(255,255,255,0.7)';
-                    octx.lineWidth = 2;
+                if (showAnim && activePendulum) {
+                    uctx.beginPath();
+                    uctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                    uctx.lineWidth = 2;
                     const start = toScreen(activePendulum.trail[0].x, activePendulum.trail[0].y);
-                    octx.moveTo(start.x, start.y);
+                    uctx.moveTo(start.x, start.y);
                     activePendulum.trail.forEach(pt => {
                         const pos = toScreen(pt.x, pt.y);
-                        octx.lineTo(pos.x, pos.y);
+                        uctx.lineTo(pos.x, pos.y);
                     });
-                    octx.stroke();
+                    uctx.stroke();
 
                     const head = toScreen(activePendulum.p.x, activePendulum.p.y);
-                    octx.fillStyle = '#fff';
-                    octx.beginPath();
-                    octx.arc(head.x, head.y, 4, 0, Math.PI * 2);
-                    octx.fill();
+                    uctx.fillStyle = '#fff';
+                    uctx.beginPath();
+                    uctx.arc(head.x, head.y, 5, 0, Math.PI * 2);
+                    uctx.fill();
                 }
+            }
+
+            function frame() {
+                drawBackground();
+                updatePhysics();
+                drawUI();
+                requestAnimationFrame(frame);
             }
 
             requestAnimationFrame(frame);
