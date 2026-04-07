@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Magnetic Pendulum Fractal</title>
+    <title>Magnetic Pendulum WebGPU</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
-            background: #111; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #050505; 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             display: flex;
             height: 100vh;
         }
@@ -17,7 +17,7 @@
             width: 280px;
             background: #000;
             color: white;
-            padding: 20px;
+            padding: 24px;
             border-right: 1px solid #333;
             display: flex;
             flex-direction: column;
@@ -34,317 +34,324 @@
         }
         .canvas-container {
             position: relative;
-            box-shadow: 0 0 50px rgba(0,0,0,0.5);
-        }
-        canvas#glcanvas { 
-            display: block; 
-            image-rendering: pixelated; 
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
             background: #000;
         }
-        h1 { margin: 0 0 10px 0; font-size: 18px; color: #fff; }
-        label { display: block; margin-bottom: 8px; font-size: 13px; color: #ccc; }
-        input[type="range"] { width: 100%; cursor: pointer; margin-bottom: 20px; }
-        .hint { font-size: 11px; opacity: 0.7; line-height: 1.4; margin-top: auto; border-top: 1px solid #222; padding-top: 15px; }
+        canvas { 
+            display: block; 
+        }
+        h1 { margin: 0 0 10px 0; font-size: 20px; color: #fff; letter-spacing: -0.5px; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; color: #aaa; }
+        input[type="range"] { width: 100%; cursor: pointer; margin-bottom: 24px; accent-color: #444; }
+        .hint { font-size: 12px; opacity: 0.6; line-height: 1.6; margin-top: auto; border-top: 1px solid #222; padding-top: 20px; }
+        .error-msg { color: #ff4444; font-size: 14px; display: none; }
     </style>
 </head>
 <body>
     <div class="sidebar">
         <h1>Magnetic Pendulum</h1>
+        <p id="gpu-error" class="error-msg">WebGPU is not supported in your browser.</p>
+        
         <label id="resLabel">Resolution: 512x512</label>
         <input type="range" id="resSlider" min="128" max="1024" value="512" step="1">
         
         <div class="hint">
-            • Drag Red, Green, Blue magnets to rearrange.<br><br>
-            • Click on the view to launch a single pendulum.<br><br>
-            • Pendulum vanishes when it reaches a magnet.
+            • Powered by WebGPU for maximum performance.<br><br>
+            • Drag magnets to rearrange the field.<br><br>
+            • Click the view to launch a single pendulum.<br><br>
+            • Pendulum vanishes upon reaching a target.
         </div>
     </div>
     
     <div class="main-view">
         <div class="canvas-container" id="container">
-            <canvas id="glcanvas"></canvas>
+            <canvas id="gpuCanvas"></canvas>
         </div>
     </div>
 
-    <script>
-        const vsSource = `
-            attribute vec2 position;
-            void main() {
-                gl_Position = vec4(position, 0.0, 1.0);
+    <script type="module">
+        const shaderSource = `
+            struct Uniforms {
+                res: vec2<f32>,
+                m1: vec2<f32>,
+                m2: vec2<f32>,
+                m3: vec2<f32>,
+            };
+
+            @group(0) @binding(0) var<uniform> ui: Uniforms;
+
+            struct VertexOutput {
+                @builtin(position) pos: vec4<f32>,
+                @location(0) uv: vec2<f32>,
+            };
+
+            @vertex
+            fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
+                var pos = array<vec2<f32>, 4>(
+                    vec2(-1.0, -1.0), vec2(1.0, -1.0),
+                    vec2(-1.0, 1.0), vec2(1.0, 1.0)
+                );
+                var out: VertexOutput;
+                out.pos = vec4<f32>(pos[idx], 0.0, 1.0);
+                out.uv = pos[idx];
+                return out;
             }
-        `;
 
-        const fsSource = `
-            precision highp float;
-            uniform vec2 resolution;
-            uniform vec2 m1, m2, m3;
+            @fragment
+            fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+                let aspect = ui.res.x / ui.res.y;
+                var coord = in.uv;
+                if (aspect > 1.0) { coord.x *= aspect; } 
+                else { coord.y /= aspect; }
+                
+                var p = coord * 2.0;
+                var v = vec2<f32>(0.0);
+                let h = 0.25;
+                let dt = 0.05;
+                var settled = 0;
+                var steps = 0.0;
 
-            void main() {
-                vec2 uv = (gl_FragCoord.xy - 0.5 * resolution.xy) / min(resolution.x, resolution.y);
-                vec2 p = uv * 4.0; 
-                vec2 v = vec2(0.0);
-
-                float h = 0.25;
-                float dt = 0.05;
-                int settled = 0;
-                float steps = 0.0;
-
-                for(int i=0; i<300; i++) {
-                    vec2 f = -0.25 * p - 0.07 * v;
+                for (var i = 0; i < 300; i++) {
+                    let f_friction = -0.25 * p - 0.07 * v;
                     
-                    float d1 = pow(dot(p-m1, p-m1) + h*h, 1.5);
-                    float d2 = pow(dot(p-m2, p-m2) + h*h, 1.5);
-                    float d3 = pow(dot(p-m3, p-m3) + h*h, 1.5);
+                    let d1 = pow(dot(p - ui.m1, p - ui.m1) + h*h, 1.5);
+                    let d2 = pow(dot(p - ui.m2, p - ui.m2) + h*h, 1.5);
+                    let d3 = pow(dot(p - ui.m3, p - ui.m3) + h*h, 1.5);
 
-                    f += (m1 - p) / d1;
-                    f += (m2 - p) / d2;
-                    f += (m3 - p) / d3;
-
+                    let f = f_friction + (ui.m1 - p)/d1 + (ui.m2 - p)/d2 + (ui.m3 - p)/d3;
+                    
                     v += f * dt;
                     p += v * dt;
                     steps += 1.0;
 
-                    if (dot(v,v) < 0.001) {
-                        if(length(p-m1) < 0.2) { settled = 1; break; }
-                        if(length(p-m2) < 0.2) { settled = 2; break; }
-                        if(length(p-m3) < 0.2) { settled = 3; break; }
+                    if (dot(v, v) < 0.001) {
+                        if (length(p - ui.m1) < 0.2) { settled = 1; break; }
+                        if (length(p - ui.m2) < 0.2) { settled = 2; break; }
+                        if (length(p - ui.m3) < 0.2) { settled = 3; break; }
                     }
                 }
 
-                if(settled == 0) {
-                    float dist1 = length(p-m1);
-                    float dist2 = length(p-m2);
-                    float dist3 = length(p-m3);
-                    if(dist1 < dist2 && dist1 < dist3) settled = 1;
-                    else if(dist2 < dist1 && dist2 < dist3) settled = 2;
-                    else settled = 3;
+                if (settled == 0) {
+                    let dists = vec3<f32>(length(p - ui.m1), length(p - ui.m2), length(p - ui.m3));
+                    if (dists.x < dists.y && dists.x < dists.z) { settled = 1; }
+                    else if (dists.y < dists.x && dists.y < dists.z) { settled = 2; }
+                    else { settled = 3; }
                 }
 
-                vec3 col = vec3(0.0);
-                float shade = 0.4 + 0.6 * pow(1.0 - (steps / 300.0), 1.2);
+                let shade = 0.4 + 0.6 * pow(1.0 - (steps / 300.0), 1.2);
+                var col: vec3<f32>;
+                if (settled == 1) { col = vec3(1.0, 0.2, 0.2); }
+                else if (settled == 2) { col = vec3(0.2, 1.0, 0.2); }
+                else { col = vec3(0.2, 0.2, 1.0); }
 
-                if(settled == 1) col = vec3(1.0, 0.1, 0.1) * shade;
-                else if(settled == 2) col = vec3(0.1, 1.0, 0.1) * shade;
-                else if(settled == 3) col = vec3(0.1, 0.1, 1.0) * shade;
-
-                gl_FragColor = vec4(col, 1.0);
+                return vec4<f32>(col * shade, 1.0);
             }
         `;
 
-        let magnets = [
-            { x: 0.0, y: 1.2 },
-            { x: 1.0, y: -0.8 },
-            { x: -1.0, y: -0.8 }
-        ];
-        
+        let magnets = [{x: 0, y: 0.6}, {x: 0.5, y: -0.4}, {x: -0.5, y: -0.4}];
         let activePendulum = null;
         let draggingIdx = -1;
 
-        function createShader(gl, type, source) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-            return shader;
-        }
+        async function init() {
+            if (!navigator.gpu) {
+                document.getElementById('gpu-error').style.display = 'block';
+                return;
+            }
 
-        function init() {
-            const canvas = document.getElementById('glcanvas');
-            const container = document.getElementById('container');
+            const adapter = await navigator.gpu.requestAdapter();
+            const device = await adapter.requestDevice();
+            const canvas = document.getElementById('gpuCanvas');
+            const context = canvas.getContext('webgpu');
             const resSlider = document.getElementById('resSlider');
             const resLabel = document.getElementById('resLabel');
-            const gl = canvas.getContext('webgl');
 
-            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-            const program = gl.createProgram();
-            gl.attachShader(program, vertexShader);
-            gl.attachShader(program, fragmentShader);
-            gl.linkProgram(program);
-            gl.useProgram(program);
+            const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({ device, format: presentationFormat, alphaMode: 'premultiplied' });
 
-            const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
-            const buffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            const shaderModule = device.createShaderModule({ code: shaderSource });
+            const pipeline = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: { module: shaderModule, entryPoint: 'vs_main' },
+                fragment: {
+                    module: shaderModule,
+                    entryPoint: 'fs_main',
+                    targets: [{ format: presentationFormat }]
+                },
+                primitive: { topology: 'triangle-strip' }
+            });
 
-            const posLoc = gl.getAttribLocation(program, 'position');
-            gl.enableVertexAttribArray(posLoc);
-            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+            const uniformBuffer = device.createBuffer({
+                size: 64, // 2+2+2+2 float32 (8 * 8 bytes padding etc)
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
 
-            const resLoc = gl.getUniformLocation(program, 'resolution');
-            const m1Loc = gl.getUniformLocation(program, 'm1');
-            const m2Loc = gl.getUniformLocation(program, 'm2');
-            const m3Loc = gl.getUniformLocation(program, 'm3');
+            const bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [{ binding: 0, resource: { buffer: uniformBuffer } }]
+            });
 
             const overlay = document.createElement('canvas');
             overlay.style.position = 'absolute';
             overlay.style.top = '0';
             overlay.style.left = '0';
             overlay.style.pointerEvents = 'none';
-            container.appendChild(overlay);
+            document.getElementById('container').appendChild(overlay);
             const octx = overlay.getContext('2d');
 
-            function updateResolution() {
+            function updateSize() {
                 const val = parseInt(resSlider.value);
                 canvas.width = val;
                 canvas.height = val;
                 canvas.style.width = val + 'px';
                 canvas.style.height = val + 'px';
-                
                 overlay.width = val;
                 overlay.height = val;
                 overlay.style.width = val + 'px';
                 overlay.style.height = val + 'px';
-                
                 resLabel.innerText = `Resolution: ${val}x${val}`;
             }
 
-            resSlider.addEventListener('input', updateResolution);
-            updateResolution();
+            resSlider.addEventListener('input', updateSize);
+            updateSize();
 
             function getMousePos(e) {
                 const rect = canvas.getBoundingClientRect();
-                let x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                let y = (((e.clientY - rect.top) / rect.height) * 2 - 1) * -1;
-                return { x: x * 2.0, y: y * 2.0 };
+                const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                const y = (1 - (e.clientY - rect.top) / rect.height) * 2 - 1;
+                return { x: x * 1.0, y: y * 1.0 };
             }
 
             canvas.addEventListener('mousedown', (e) => {
-                const mouse = getMousePos(e);
-                let hitIdx = -1;
-                magnets.forEach((m, i) => {
-                    if (Math.hypot(m.x - mouse.x, m.y - mouse.y) < 0.3) hitIdx = i;
+                const m = getMousePos(e);
+                let hit = -1;
+                magnets.forEach((mag, i) => {
+                    if (Math.hypot(mag.x - m.x, mag.y - m.y) < 0.15) hit = i;
                 });
 
-                if (hitIdx !== -1) {
-                    draggingIdx = hitIdx;
-                } else {
+                if (hit !== -1) { draggingIdx = hit; } 
+                else {
                     activePendulum = {
-                        p: { x: mouse.x, y: mouse.y },
+                        p: { x: m.x, y: m.y },
                         v: { x: 0, y: 0 },
-                        trail: [{ x: mouse.x, y: mouse.y }],
-                        isSettled: false
+                        trail: [{ x: m.x, y: m.y }]
                     };
                 }
             });
 
             window.addEventListener('mousemove', (e) => {
                 if (draggingIdx !== -1) {
-                    const mouse = getMousePos(e);
-                    magnets[draggingIdx].x = mouse.x;
-                    magnets[draggingIdx].y = mouse.y;
+                    const m = getMousePos(e);
+                    magnets[draggingIdx] = { x: m.x, y: m.y };
                 }
             });
-
             window.addEventListener('mouseup', () => draggingIdx = -1);
 
-            function updatePhysics() {
-                if (!activePendulum || activePendulum.isSettled) return;
+            function frame() {
+                const uniformData = new Float32Array([
+                    canvas.width, canvas.height,
+                    magnets[0].x, magnets[0].y,
+                    magnets[1].x, magnets[1].y,
+                    magnets[2].x, magnets[2].y,
+                ]);
+                device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
+                const commandEncoder = device.createCommandEncoder();
+                const passEncoder = commandEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                passEncoder.setPipeline(pipeline);
+                passEncoder.setBindGroup(0, bindGroup);
+                passEncoder.draw(4);
+                passEncoder.end();
+                device.queue.submit([commandEncoder.finish()]);
+
+                updatePhysics();
+                drawOverlay();
+                requestAnimationFrame(frame);
+            }
+
+            function updatePhysics() {
+                if (!activePendulum) return;
+                const p = activePendulum;
                 const dt = 0.05;
                 const h = 0.25;
-                const pen = activePendulum;
 
-                let fx = -0.25 * pen.p.x - 0.07 * pen.v.x;
-                let fy = -0.25 * pen.p.y - 0.07 * pen.v.y;
+                let fx = -0.25 * p.p.x - 0.07 * p.v.x;
+                let fy = -0.25 * p.p.y - 0.07 * p.v.y;
 
                 magnets.forEach(m => {
-                    const dx = m.x - pen.p.x;
-                    const dy = m.y - pen.p.y;
+                    const dx = m.x - p.p.x;
+                    const dy = m.y - p.p.y;
                     const d = Math.pow(dx*dx + dy*dy + h*h, 1.5);
                     fx += dx / d;
                     fy += dy / d;
                 });
 
-                pen.v.x += fx * dt;
-                pen.v.y += fy * dt;
-                pen.p.x += pen.v.x * dt;
-                pen.p.y += pen.v.y * dt;
-                
-                pen.trail.push({ x: pen.p.x, y: pen.p.y });
-                if (pen.trail.length > 150) pen.trail.shift();
+                p.v.x += fx * dt;
+                p.v.y += fy * dt;
+                p.p.x += p.v.x * dt;
+                p.p.y += p.v.y * dt;
+                p.trail.push({x: p.p.x, y: p.p.y});
+                if (p.trail.length > 100) p.trail.shift();
 
-                const velSq = pen.v.x * pen.v.x + pen.v.y * pen.v.y;
-                if (velSq < 0.001) {
+                if (p.v.x*p.v.x + p.v.y*p.v.y < 0.001) {
                     magnets.forEach(m => {
-                        if (Math.hypot(m.x - pen.p.x, m.y - pen.p.y) < 0.25) {
-                            activePendulum = null;
-                        }
+                        if (Math.hypot(m.x - p.p.x, m.y - p.p.y) < 0.15) activePendulum = null;
                     });
                 }
             }
 
             function drawOverlay() {
+                octx.clearRect(0, 0, overlay.width, overlay.height);
                 const w = overlay.width;
                 const h = overlay.height;
 
-                const worldToScreen = (wx, wy) => {
-                    return {
-                        x: (wx / 2.0 + 1) * 0.5 * w,
-                        y: (1 - (wy / 2.0 + 1) * 0.5) * h
-                    };
-                };
+                const toScreen = (wx, wy) => ({
+                    x: (wx + 1) * 0.5 * w,
+                    y: (1 - (wy + 1) * 0.5) * h
+                });
 
-                octx.clearRect(0, 0, w, h);
-
-                const colors = ['#ff4444', '#44ff44', '#4444ff'];
+                const colors = ['#ff4b2b', '#1d976c', '#2193b0'];
                 magnets.forEach((m, i) => {
-                    const pos = worldToScreen(m.x, m.y);
+                    const pos = toScreen(m.x, m.y);
                     octx.fillStyle = colors[i];
                     octx.beginPath();
-                    octx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+                    octx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
                     octx.fill();
-                    octx.strokeStyle = 'white';
+                    octx.strokeStyle = '#fff';
                     octx.lineWidth = 2;
                     octx.stroke();
                 });
 
                 if (activePendulum) {
-                    const pen = activePendulum;
-                    if (pen.trail.length > 1) {
-                        octx.beginPath();
-                        octx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                        octx.lineWidth = 3;
-                        octx.lineCap = 'round';
-                        octx.lineJoin = 'round';
-                        
-                        const start = worldToScreen(pen.trail[0].x, pen.trail[0].y);
-                        octx.moveTo(start.x, start.y);
-                        for (let i = 1; i < pen.trail.length; i++) {
-                            const p = worldToScreen(pen.trail[i].x, pen.trail[i].y);
-                            octx.lineTo(p.x, p.y);
-                        }
-                        octx.stroke();
-                    }
-                    
-                    const head = worldToScreen(pen.p.x, pen.p.y);
-                    octx.fillStyle = 'white';
                     octx.beginPath();
-                    octx.arc(head.x, head.y, 6, 0, Math.PI * 2);
-                    octx.fill();
-                    octx.strokeStyle = 'black';
-                    octx.lineWidth = 1;
+                    octx.strokeStyle = 'rgba(255,255,255,0.7)';
+                    octx.lineWidth = 2;
+                    const start = toScreen(activePendulum.trail[0].x, activePendulum.trail[0].y);
+                    octx.moveTo(start.x, start.y);
+                    activePendulum.trail.forEach(pt => {
+                        const pos = toScreen(pt.x, pt.y);
+                        octx.lineTo(pos.x, pos.y);
+                    });
                     octx.stroke();
+
+                    const head = toScreen(activePendulum.p.x, activePendulum.p.y);
+                    octx.fillStyle = '#fff';
+                    octx.beginPath();
+                    octx.arc(head.x, head.y, 4, 0, Math.PI * 2);
+                    octx.fill();
                 }
             }
 
-            function render() {
-                gl.viewport(0, 0, canvas.width, canvas.height);
-                gl.uniform2f(resLoc, canvas.width, canvas.height);
-                gl.uniform2f(m1Loc, magnets[0].x, magnets[0].y);
-                gl.uniform2f(m2Loc, magnets[1].x, magnets[1].y);
-                gl.uniform2f(m3Loc, magnets[2].x, magnets[2].y);
-                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-                updatePhysics();
-                drawOverlay();
-                requestAnimationFrame(render);
-            }
-
-            render();
+            requestAnimationFrame(frame);
         }
 
-        window.onload = init;
+        init();
     </script>
 </body>
 </html>
