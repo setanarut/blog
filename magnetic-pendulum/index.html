@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magnetic Pendulum Fractal</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #111; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #000;
+            color: white;
+            padding: 20px;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+        .main-view {
+            flex-grow: 1;
+            position: relative;
+            background: #0a0a0a;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .canvas-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+        canvas#glcanvas { 
+            display: block; 
+            image-rendering: pixelated; 
+            background: #000;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 18px; color: #fff; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; color: #ccc; }
+        input[type="range"] { width: 100%; cursor: pointer; margin-bottom: 20px; }
+        .hint { font-size: 11px; opacity: 0.7; line-height: 1.4; margin-top: auto; border-top: 1px solid #222; padding-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1>Magnetic Pendulum</h1>
+        <label id="resLabel">Resolution: 512x512</label>
+        <input type="range" id="resSlider" min="128" max="1024" value="512" step="1">
+        
+        <div class="hint">
+            • Drag Red, Green, Blue magnets to rearrange.<br><br>
+            • Click on the view to launch a single pendulum.<br><br>
+            • Pendulum vanishes when it reaches a magnet.
+        </div>
+    </div>
+    
+    <div class="main-view">
+        <div class="canvas-container" id="container">
+            <canvas id="glcanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const vsSource = `
+            attribute vec2 position;
+            void main() {
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `
+            precision highp float;
+            uniform vec2 resolution;
+            uniform vec2 m1, m2, m3;
+
+            void main() {
+                vec2 uv = (gl_FragCoord.xy - 0.5 * resolution.xy) / min(resolution.x, resolution.y);
+                vec2 p = uv * 4.0; 
+                vec2 v = vec2(0.0);
+
+                float h = 0.25;
+                float dt = 0.05;
+                int settled = 0;
+                float steps = 0.0;
+
+                for(int i=0; i<300; i++) {
+                    vec2 f = -0.25 * p - 0.07 * v;
+                    
+                    float d1 = pow(dot(p-m1, p-m1) + h*h, 1.5);
+                    float d2 = pow(dot(p-m2, p-m2) + h*h, 1.5);
+                    float d3 = pow(dot(p-m3, p-m3) + h*h, 1.5);
+
+                    f += (m1 - p) / d1;
+                    f += (m2 - p) / d2;
+                    f += (m3 - p) / d3;
+
+                    v += f * dt;
+                    p += v * dt;
+                    steps += 1.0;
+
+                    if (dot(v,v) < 0.001) {
+                        if(length(p-m1) < 0.2) { settled = 1; break; }
+                        if(length(p-m2) < 0.2) { settled = 2; break; }
+                        if(length(p-m3) < 0.2) { settled = 3; break; }
+                    }
+                }
+
+                if(settled == 0) {
+                    float dist1 = length(p-m1);
+                    float dist2 = length(p-m2);
+                    float dist3 = length(p-m3);
+                    if(dist1 < dist2 && dist1 < dist3) settled = 1;
+                    else if(dist2 < dist1 && dist2 < dist3) settled = 2;
+                    else settled = 3;
+                }
+
+                vec3 col = vec3(0.0);
+                float shade = 0.4 + 0.6 * pow(1.0 - (steps / 300.0), 1.2);
+
+                if(settled == 1) col = vec3(1.0, 0.1, 0.1) * shade;
+                else if(settled == 2) col = vec3(0.1, 1.0, 0.1) * shade;
+                else if(settled == 3) col = vec3(0.1, 0.1, 1.0) * shade;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `;
+
+        let magnets = [
+            { x: 0.0, y: 1.2 },
+            { x: 1.0, y: -0.8 },
+            { x: -1.0, y: -0.8 }
+        ];
+        
+        let activePendulum = null;
+        let draggingIdx = -1;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        function init() {
+            const canvas = document.getElementById('glcanvas');
+            const container = document.getElementById('container');
+            const resSlider = document.getElementById('resSlider');
+            const resLabel = document.getElementById('resLabel');
+            const gl = canvas.getContext('webgl');
+
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            gl.useProgram(program);
+
+            const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+            const posLoc = gl.getAttribLocation(program, 'position');
+            gl.enableVertexAttribArray(posLoc);
+            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+            const resLoc = gl.getUniformLocation(program, 'resolution');
+            const m1Loc = gl.getUniformLocation(program, 'm1');
+            const m2Loc = gl.getUniformLocation(program, 'm2');
+            const m3Loc = gl.getUniformLocation(program, 'm3');
+
+            const overlay = document.createElement('canvas');
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.pointerEvents = 'none';
+            container.appendChild(overlay);
+            const octx = overlay.getContext('2d');
+
+            function updateResolution() {
+                const val = parseInt(resSlider.value);
+                canvas.width = val;
+                canvas.height = val;
+                canvas.style.width = val + 'px';
+                canvas.style.height = val + 'px';
+                
+                overlay.width = val;
+                overlay.height = val;
+                overlay.style.width = val + 'px';
+                overlay.style.height = val + 'px';
+                
+                resLabel.innerText = `Resolution: ${val}x${val}`;
+            }
+
+            resSlider.addEventListener('input', updateResolution);
+            updateResolution();
+
+            function getMousePos(e) {
+                const rect = canvas.getBoundingClientRect();
+                let x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                let y = (((e.clientY - rect.top) / rect.height) * 2 - 1) * -1;
+                return { x: x * 2.0, y: y * 2.0 };
+            }
+
+            canvas.addEventListener('mousedown', (e) => {
+                const mouse = getMousePos(e);
+                let hitIdx = -1;
+                magnets.forEach((m, i) => {
+                    if (Math.hypot(m.x - mouse.x, m.y - mouse.y) < 0.3) hitIdx = i;
+                });
+
+                if (hitIdx !== -1) {
+                    draggingIdx = hitIdx;
+                } else {
+                    activePendulum = {
+                        p: { x: mouse.x, y: mouse.y },
+                        v: { x: 0, y: 0 },
+                        trail: [{ x: mouse.x, y: mouse.y }],
+                        isSettled: false
+                    };
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (draggingIdx !== -1) {
+                    const mouse = getMousePos(e);
+                    magnets[draggingIdx].x = mouse.x;
+                    magnets[draggingIdx].y = mouse.y;
+                }
+            });
+
+            window.addEventListener('mouseup', () => draggingIdx = -1);
+
+            function updatePhysics() {
+                if (!activePendulum || activePendulum.isSettled) return;
+
+                const dt = 0.05;
+                const h = 0.25;
+                const pen = activePendulum;
+
+                let fx = -0.25 * pen.p.x - 0.07 * pen.v.x;
+                let fy = -0.25 * pen.p.y - 0.07 * pen.v.y;
+
+                magnets.forEach(m => {
+                    const dx = m.x - pen.p.x;
+                    const dy = m.y - pen.p.y;
+                    const d = Math.pow(dx*dx + dy*dy + h*h, 1.5);
+                    fx += dx / d;
+                    fy += dy / d;
+                });
+
+                pen.v.x += fx * dt;
+                pen.v.y += fy * dt;
+                pen.p.x += pen.v.x * dt;
+                pen.p.y += pen.v.y * dt;
+                
+                pen.trail.push({ x: pen.p.x, y: pen.p.y });
+                if (pen.trail.length > 150) pen.trail.shift();
+
+                const velSq = pen.v.x * pen.v.x + pen.v.y * pen.v.y;
+                if (velSq < 0.001) {
+                    magnets.forEach(m => {
+                        if (Math.hypot(m.x - pen.p.x, m.y - pen.p.y) < 0.25) {
+                            activePendulum = null;
+                        }
+                    });
+                }
+            }
+
+            function drawOverlay() {
+                const w = overlay.width;
+                const h = overlay.height;
+
+                const worldToScreen = (wx, wy) => {
+                    return {
+                        x: (wx / 2.0 + 1) * 0.5 * w,
+                        y: (1 - (wy / 2.0 + 1) * 0.5) * h
+                    };
+                };
+
+                octx.clearRect(0, 0, w, h);
+
+                const colors = ['#ff4444', '#44ff44', '#4444ff'];
+                magnets.forEach((m, i) => {
+                    const pos = worldToScreen(m.x, m.y);
+                    octx.fillStyle = colors[i];
+                    octx.beginPath();
+                    octx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+                    octx.fill();
+                    octx.strokeStyle = 'white';
+                    octx.lineWidth = 2;
+                    octx.stroke();
+                });
+
+                if (activePendulum) {
+                    const pen = activePendulum;
+                    if (pen.trail.length > 1) {
+                        octx.beginPath();
+                        octx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                        octx.lineWidth = 3;
+                        octx.lineCap = 'round';
+                        octx.lineJoin = 'round';
+                        
+                        const start = worldToScreen(pen.trail[0].x, pen.trail[0].y);
+                        octx.moveTo(start.x, start.y);
+                        for (let i = 1; i < pen.trail.length; i++) {
+                            const p = worldToScreen(pen.trail[i].x, pen.trail[i].y);
+                            octx.lineTo(p.x, p.y);
+                        }
+                        octx.stroke();
+                    }
+                    
+                    const head = worldToScreen(pen.p.x, pen.p.y);
+                    octx.fillStyle = 'white';
+                    octx.beginPath();
+                    octx.arc(head.x, head.y, 6, 0, Math.PI * 2);
+                    octx.fill();
+                    octx.strokeStyle = 'black';
+                    octx.lineWidth = 1;
+                    octx.stroke();
+                }
+            }
+
+            function render() {
+                gl.viewport(0, 0, canvas.width, canvas.height);
+                gl.uniform2f(resLoc, canvas.width, canvas.height);
+                gl.uniform2f(m1Loc, magnets[0].x, magnets[0].y);
+                gl.uniform2f(m2Loc, magnets[1].x, magnets[1].y);
+                gl.uniform2f(m3Loc, magnets[2].x, magnets[2].y);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+                updatePhysics();
+                drawOverlay();
+                requestAnimationFrame(render);
+            }
+
+            render();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
