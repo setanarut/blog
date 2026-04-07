@@ -44,8 +44,35 @@
             left: 0;
         }
         h1 { margin: 0 0 10px 0; font-size: 20px; color: #fff; letter-spacing: -0.5px; }
-        label { display: block; margin-bottom: 8px; font-size: 13px; color: #aaa; }
-        input[type="range"] { width: 100%; cursor: pointer; margin-bottom: 24px; accent-color: #444; }
+        label { display: block; margin-bottom: 4px; font-size: 13px; color: #aaa; }
+        
+        .dim-inputs { display: flex; gap: 10px; margin-bottom: 24px; }
+        .dim-inputs div { flex: 1; }
+        input[type="number"] {
+            width: 100%;
+            background: #222;
+            color: white;
+            border: 1px solid #444;
+            padding: 6px;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        input[type="color"] {
+            width: 100%;
+            height: 36px;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 24px;
+            padding: 2px;
+        }
+        input[type="color"]:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
         button {
             background: #222;
             color: white;
@@ -54,7 +81,7 @@
             cursor: pointer;
             border-radius: 4px;
             font-size: 13px;
-            margin-bottom: 20px;
+            margin-bottom: 12px;
         }
         button:hover { background: #333; }
         .hint { font-size: 12px; opacity: 0.6; line-height: 1.6; margin-top: auto; border-top: 1px solid #222; padding-top: 20px; }
@@ -66,15 +93,31 @@
         <h1>Magnetic Pendulum</h1>
         <p id="gpu-error" class="error-msg">WebGPU is not supported.</p>
         
-        <label id="resLabel">Resolution: 512x512</label>
-        <input type="range" id="resSlider" min="128" max="1024" value="512" step="1">
+        <div class="dim-inputs">
+            <div>
+                <label>Width (W)</label>
+                <input type="number" id="wBox" value="512" min="100" max="2000">
+            </div>
+            <div>
+                <label>Height (H)</label>
+                <input type="number" id="hBox" value="512" min="100" max="2000">
+            </div>
+        </div>
         
+        <div>
+            <label>Magnet Color</label>
+            <input type="color" id="magnetColor" disabled>
+        </div>
+        
+        <button id="addMag">Add Magnet</button>
         <button id="toggleAnim">Hide Pendulum Animation</button>
         
         <div class="hint">
-            • Shader only runs once when magnets move.<br><br>
-            • Pendulum is drawn on a separate 2D canvas.<br><br>
-            • Click to launch pendulum.
+            • Change W & H to resize canvas.<br><br>
+            • Click 'Add Magnet' to insert up to 16 magnets.<br><br>
+            • Click a magnet to select & change color.<br><br>
+            • <b>Right-click</b> on a magnet to delete it.<br><br>
+            • Click empty space to launch pendulum.
         </div>
     </div>
     
@@ -89,9 +132,10 @@
         const shaderSource = `
             struct Uniforms {
                 res: vec2<f32>,
-                m1: vec2<f32>,
-                m2: vec2<f32>,
-                m3: vec2<f32>,
+                magnetCount: u32,
+                _pad: u32,
+                magnets: array<vec4<f32>, 16>,
+                colors: array<vec4<f32>, 16>,
             };
             @group(0) @binding(0) var<uniform> ui: Uniforms;
 
@@ -123,40 +167,59 @@
                 var steps = 0.0;
 
                 for (var i = 0; i < 300; i++) {
-                    let f_friction = -0.25 * p - 0.07 * v;
-                    let d1 = pow(dot(p - ui.m1, p - ui.m1) + h*h, 1.5);
-                    let d2 = pow(dot(p - ui.m2, p - ui.m2) + h*h, 1.5);
-                    let d3 = pow(dot(p - ui.m3, p - ui.m3) + h*h, 1.5);
-                    let f = f_friction + (ui.m1 - p)/d1 + (ui.m2 - p)/d2 + (ui.m3 - p)/d3;
+                    var f = -0.25 * p - 0.07 * v;
+                    
+                    for (var m = 0u; m < ui.magnetCount; m++) {
+                        let mPos = ui.magnets[m].xy;
+                        let d = pow(dot(p - mPos, p - mPos) + h*h, 1.5);
+                        f += (mPos - p) / d;
+                    }
+                    
                     v += f * dt;
                     p += v * dt;
                     steps += 1.0;
+                    
                     if (dot(v, v) < 0.001) {
-                        if (length(p - ui.m1) < 0.2) { settled = 1; break; }
-                        if (length(p - ui.m2) < 0.2) { settled = 2; break; }
-                        if (length(p - ui.m3) < 0.2) { settled = 3; break; }
+                        for (var m = 0u; m < ui.magnetCount; m++) {
+                            if (length(p - ui.magnets[m].xy) < 0.2) { 
+                                settled = i32(m) + 1; 
+                                break; 
+                            }
+                        }
+                        if (settled > 0) { break; }
                     }
                 }
 
-                if (settled == 0) {
-                    let dists = vec3<f32>(length(p - ui.m1), length(p - ui.m2), length(p - ui.m3));
-                    if (dists.x < dists.y && dists.x < dists.z) { settled = 1; }
-                    else if (dists.y < dists.x && dists.y < dists.z) { settled = 2; }
-                    else { settled = 3; }
+                if (settled == 0 && ui.magnetCount > 0u) {
+                    var minDist = 9999.0;
+                    for (var m = 0u; m < ui.magnetCount; m++) {
+                        let dist = length(p - ui.magnets[m].xy);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            settled = i32(m) + 1;
+                        }
+                    }
                 }
 
                 let shade = 0.4 + 0.6 * pow(1.0 - (steps / 300.0), 1.2);
-                var col: vec3<f32>;
-                if (settled == 1) { col = vec3(1.0, 0.2, 0.2); }
-                else if (settled == 2) { col = vec3(0.2, 1.0, 0.2); }
-                else { col = vec3(0.2, 0.2, 1.0); }
+                var col = vec3<f32>(0.0);
+                if (settled > 0) {
+                    col = ui.colors[settled - 1].rgb;
+                }
+                
                 return vec4<f32>(col * shade, 1.0);
             }
         `;
 
-        let magnets = [{x: 0, y: 0.6}, {x: 0.5, y: -0.4}, {x: -0.5, y: -0.4}];
+        let magnets = [
+            {x: 0, y: 0.6, c: [1.0, 0.2, 0.2]},
+            {x: 0.5, y: -0.4, c: [0.2, 1.0, 0.2]},
+            {x: -0.5, y: -0.4, c: [0.2, 0.2, 1.0]}
+        ];
+        
         let activePendulum = null;
         let draggingIdx = -1;
+        let selectedIdx = -1;
         let needsUpdate = true;
         let showAnim = true;
 
@@ -172,8 +235,12 @@
             const uiCanvas = document.getElementById('uiCanvas');
             const context = canvas.getContext('webgpu');
             const uctx = uiCanvas.getContext('2d');
-            const resSlider = document.getElementById('resSlider');
+            
+            const wBox = document.getElementById('wBox');
+            const hBox = document.getElementById('hBox');
+            const colorPicker = document.getElementById('magnetColor');
             const toggleBtn = document.getElementById('toggleAnim');
+            const addMagBtn = document.getElementById('addMag');
 
             const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
             context.configure({ device, format: presentationFormat, alphaMode: 'premultiplied' });
@@ -191,7 +258,7 @@
             });
 
             const uniformBuffer = device.createBuffer({
-                size: 64,
+                size: 528, 
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -201,40 +268,97 @@
             });
 
             function updateSize() {
-                const val = parseInt(resSlider.value);
+                const w = parseInt(wBox.value) || 512;
+                const h = parseInt(hBox.value) || 512;
+                
                 const container = document.getElementById('container');
-                container.style.width = val + 'px';
-                container.style.height = val + 'px';
+                container.style.width = w + 'px';
+                container.style.height = h + 'px';
                 
-                canvas.width = val;
-                canvas.height = val;
-                canvas.style.width = val + 'px';
-                canvas.style.height = val + 'px';
+                canvas.width = w;
+                canvas.height = h;
+                canvas.style.width = w + 'px';
+                canvas.style.height = h + 'px';
                 
-                uiCanvas.width = val;
-                uiCanvas.height = val;
-                uiCanvas.style.width = val + 'px';
-                uiCanvas.style.height = val + 'px';
+                uiCanvas.width = w;
+                uiCanvas.height = h;
+                uiCanvas.style.width = w + 'px';
+                uiCanvas.style.height = h + 'px';
                 
-                document.getElementById('resLabel').innerText = `Resolution: ${val}x${val}`;
                 needsUpdate = true;
             }
 
-            resSlider.addEventListener('input', updateSize);
+            wBox.addEventListener('change', updateSize);
+            hBox.addEventListener('change', updateSize);
+            
             toggleBtn.addEventListener('click', () => {
                 showAnim = !showAnim;
                 toggleBtn.innerText = showAnim ? "Hide Pendulum Animation" : "Show Pendulum Animation";
             });
+
+            addMagBtn.addEventListener('click', () => {
+                if (magnets.length >= 16) return;
+                const rc = () => Math.random() * 0.8 + 0.2;
+                magnets.push({ x: 0, y: 0, c: [rc(), rc(), rc()] });
+                needsUpdate = true;
+            });
+
+            function rgbToHex(c) {
+                const r = Math.round(c[0] * 255).toString(16).padStart(2, '0');
+                const g = Math.round(c[1] * 255).toString(16).padStart(2, '0');
+                const b = Math.round(c[2] * 255).toString(16).padStart(2, '0');
+                return `#${r}${g}${b}`;
+            }
+
+            function hexToRgb(hex) {
+                const r = parseInt(hex.slice(1, 3), 16) / 255;
+                const g = parseInt(hex.slice(3, 5), 16) / 255;
+                const b = parseInt(hex.slice(5, 7), 16) / 255;
+                return [r, g, b];
+            }
+
+            colorPicker.addEventListener('input', (e) => {
+                if (selectedIdx !== -1 && magnets[selectedIdx]) {
+                    magnets[selectedIdx].c = hexToRgb(e.target.value);
+                    needsUpdate = true;
+                }
+            });
+
             updateSize();
 
+            // FIX: getMousePos — shader p-space = uv * aspect * 2
+            // So x ∈ [-2*aspect, 2*aspect], y ∈ [-2, 2] (for aspect >= 1)
             function getMousePos(e) {
                 const rect = uiCanvas.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                const y = (1 - (e.clientY - rect.top) / rect.height) * 2 - 1;
-                return { x, y };
+                const aspect = canvas.width / canvas.height;
+                const uvx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                const uvy = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+                if (aspect > 1.0) {
+                    return { x: uvx * aspect * 2, y: uvy * 2 };
+                } else {
+                    return { x: uvx * 2, y: uvy / aspect * 2 };
+                }
+            }
+
+            // FIX: screenToWorld — inverse of getMousePos
+            // Converts p-space (magnet coords) → canvas pixel coords
+            function screenToWorld(wx, wy) {
+                const aspect = canvas.width / canvas.height;
+                if (aspect > 1.0) {
+                    return {
+                        x: (wx / (aspect * 2) + 1) * canvas.width / 2,
+                        y: (1 - (wy / 2 + 1) / 2) * canvas.height
+                    };
+                } else {
+                    return {
+                        x: (wx / 2 + 1) * canvas.width / 2,
+                        y: (1 - (wy * aspect / 2 + 1) / 2) * canvas.height
+                    };
+                }
             }
 
             uiCanvas.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; 
                 const m = getMousePos(e);
                 let hit = -1;
                 magnets.forEach((mag, i) => {
@@ -243,7 +367,12 @@
 
                 if (hit !== -1) { 
                     draggingIdx = hit; 
+                    selectedIdx = hit;
+                    colorPicker.value = rgbToHex(magnets[hit].c);
+                    colorPicker.disabled = false;
                 } else {
+                    selectedIdx = -1;
+                    colorPicker.disabled = true;
                     activePendulum = {
                         p: { x: m.x, y: m.y },
                         v: { x: 0, y: 0 },
@@ -252,10 +381,31 @@
                 }
             });
 
+            uiCanvas.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const m = getMousePos(e);
+                let hit = -1;
+                magnets.forEach((mag, i) => {
+                    if (Math.hypot(mag.x - m.x, mag.y - m.y) < 0.15) hit = i;
+                });
+                
+                if (hit !== -1 && magnets.length > 1) {
+                    magnets.splice(hit, 1);
+                    if (selectedIdx === hit) {
+                        selectedIdx = -1;
+                        colorPicker.disabled = true;
+                    } else if (selectedIdx > hit) {
+                        selectedIdx--;
+                    }
+                    needsUpdate = true;
+                }
+            });
+
             window.addEventListener('mousemove', (e) => {
                 if (draggingIdx !== -1) {
                     const m = getMousePos(e);
-                    magnets[draggingIdx] = { x: m.x, y: m.y };
+                    magnets[draggingIdx].x = m.x;
+                    magnets[draggingIdx].y = m.y;
                     needsUpdate = true;
                 }
             });
@@ -263,12 +413,25 @@
 
             function drawBackground() {
                 if (!needsUpdate) return;
-                const uniformData = new Float32Array([
-                    canvas.width, canvas.height,
-                    magnets[0].x, magnets[0].y,
-                    magnets[1].x, magnets[1].y,
-                    magnets[2].x, magnets[2].y,
-                ]);
+                
+                const uniformData = new ArrayBuffer(528);
+                const floatView = new Float32Array(uniformData);
+                const uintView = new Uint32Array(uniformData);
+
+                floatView[0] = canvas.width;
+                floatView[1] = canvas.height;
+                uintView[2] = magnets.length;
+                
+                for (let i = 0; i < magnets.length; i++) {
+                    floatView[4 + i * 4] = magnets[i].x;
+                    floatView[4 + i * 4 + 1] = magnets[i].y;
+                    
+                    floatView[68 + i * 4] = magnets[i].c[0];
+                    floatView[68 + i * 4 + 1] = magnets[i].c[1];
+                    floatView[68 + i * 4 + 2] = magnets[i].c[2];
+                    floatView[68 + i * 4 + 3] = 1.0;
+                }
+
                 device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
                 const commandEncoder = device.createCommandEncoder();
@@ -321,19 +484,21 @@
 
             function drawUI() {
                 uctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
-                const w = uiCanvas.width;
-                const h = uiCanvas.height;
-                const toScreen = (wx, wy) => ({ x: (wx + 1) * 0.5 * w, y: (1 - (wy + 1) * 0.5) * h });
 
-                const colors = ['#ff4b2b', '#1d976c', '#2193b0'];
                 magnets.forEach((m, i) => {
-                    const pos = toScreen(m.x, m.y);
-                    uctx.fillStyle = colors[i];
+                    const pos = screenToWorld(m.x, m.y);
+                    uctx.fillStyle = `rgb(${m.c[0]*255}, ${m.c[1]*255}, ${m.c[2]*255})`;
                     uctx.beginPath();
                     uctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
                     uctx.fill();
-                    uctx.strokeStyle = '#fff';
-                    uctx.lineWidth = 2;
+                    
+                    if (i === selectedIdx) {
+                        uctx.strokeStyle = '#ff0';
+                        uctx.lineWidth = 3;
+                    } else {
+                        uctx.strokeStyle = '#fff';
+                        uctx.lineWidth = 2;
+                    }
                     uctx.stroke();
                 });
 
@@ -341,15 +506,15 @@
                     uctx.beginPath();
                     uctx.strokeStyle = 'rgba(255,255,255,0.7)';
                     uctx.lineWidth = 2;
-                    const start = toScreen(activePendulum.trail[0].x, activePendulum.trail[0].y);
+                    const start = screenToWorld(activePendulum.trail[0].x, activePendulum.trail[0].y);
                     uctx.moveTo(start.x, start.y);
                     activePendulum.trail.forEach(pt => {
-                        const pos = toScreen(pt.x, pt.y);
+                        const pos = screenToWorld(pt.x, pt.y);
                         uctx.lineTo(pos.x, pos.y);
                     });
                     uctx.stroke();
 
-                    const head = toScreen(activePendulum.p.x, activePendulum.p.y);
+                    const head = screenToWorld(activePendulum.p.x, activePendulum.p.y);
                     uctx.fillStyle = '#fff';
                     uctx.beginPath();
                     uctx.arc(head.x, head.y, 5, 0, Math.PI * 2);
