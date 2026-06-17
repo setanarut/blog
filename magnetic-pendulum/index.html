@@ -1,18 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Optimized Magnetic Pendulum</title>
     <style>
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            background: #050505; 
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #121212;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             display: flex;
             height: 100vh;
         }
+
         .sidebar {
             width: 280px;
             background: #000;
@@ -23,6 +25,7 @@
             flex-direction: column;
             z-index: 10;
         }
+
         .main-view {
             flex-grow: 1;
             position: relative;
@@ -32,22 +35,44 @@
             align-items: center;
             justify-content: center;
         }
+
         .canvas-container {
             position: relative;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
             background: #000;
         }
-        canvas { 
-            display: block; 
+
+        canvas {
+            display: block;
             position: absolute;
             top: 0;
             left: 0;
         }
-        h1 { margin: 0 0 10px 0; font-size: 20px; color: #fff; letter-spacing: -0.5px; }
-        label { display: block; margin-bottom: 4px; font-size: 13px; color: #aaa; }
-        
-        .dim-inputs { display: flex; gap: 10px; margin-bottom: 24px; }
-        .dim-inputs div { flex: 1; }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        .dim-inputs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+
+        .dim-inputs div {
+            flex: 1;
+        }
+
         input[type="number"] {
             width: 100%;
             background: #222;
@@ -57,7 +82,7 @@
             border-radius: 4px;
             box-sizing: border-box;
         }
-        
+
         input[type="color"] {
             width: 100%;
             height: 36px;
@@ -68,11 +93,12 @@
             margin-bottom: 24px;
             padding: 2px;
         }
+
         input[type="color"]:disabled {
             opacity: 0.3;
             cursor: not-allowed;
         }
-        
+
         button {
             background: #222;
             color: white;
@@ -83,16 +109,33 @@
             font-size: 13px;
             margin-bottom: 12px;
         }
-        button:hover { background: #333; }
-        .hint { font-size: 12px; opacity: 0.6; line-height: 1.6; margin-top: auto; border-top: 1px solid #222; padding-top: 20px; }
-        .error-msg { color: #ff4444; font-size: 14px; display: none; }
+
+        button:hover {
+            background: #333;
+        }
+
+        .hint {
+            font-size: 12px;
+            opacity: 0.6;
+            line-height: 1.6;
+            margin-top: auto;
+            border-top: 1px solid #222;
+            padding-top: 20px;
+        }
+
+        .error-msg {
+            color: #ff4444;
+            font-size: 14px;
+            display: none;
+        }
     </style>
 </head>
+
 <body>
     <div class="sidebar">
         <h1>Magnetic Pendulum</h1>
         <p id="gpu-error" class="error-msg">WebGPU is not supported.</p>
-        
+
         <div class="dim-inputs">
             <div>
                 <label>Width (W)</label>
@@ -103,15 +146,15 @@
                 <input type="number" id="hBox" value="512" min="100" max="2000">
             </div>
         </div>
-        
+
         <div>
             <label>Magnet Color</label>
             <input type="color" id="magnetColor" disabled>
         </div>
-        
+
         <button id="addMag">Add Magnet</button>
         <button id="toggleAnim">Hide Pendulum Animation</button>
-        
+
         <div class="hint">
             • Change W & H to resize canvas.<br><br>
             • Click 'Add Magnet' to insert up to 16 magnets.<br><br>
@@ -120,7 +163,7 @@
             • Click empty space to launch pendulum.
         </div>
     </div>
-    
+
     <div class="main-view">
         <div class="canvas-container" id="container">
             <canvas id="gpuCanvas"></canvas>
@@ -212,11 +255,11 @@
         `;
 
         let magnets = [
-            {x: 0, y: 0.6, c: [1.0, 0.2, 0.2]},
-            {x: 0.5, y: -0.4, c: [0.2, 1.0, 0.2]},
-            {x: -0.5, y: -0.4, c: [0.2, 0.2, 1.0]}
+            { x: 0, y: 0.6, c: [1.0, 0.2, 0.2] },
+            { x: 0.5, y: -0.4, c: [0.2, 1.0, 0.2] },
+            { x: -0.5, y: -0.4, c: [0.2, 0.2, 1.0] }
         ];
-        
+
         let activePendulum = null;
         let draggingIdx = -1;
         let selectedIdx = -1;
@@ -235,7 +278,7 @@
             const uiCanvas = document.getElementById('uiCanvas');
             const context = canvas.getContext('webgpu');
             const uctx = uiCanvas.getContext('2d');
-            
+
             const wBox = document.getElementById('wBox');
             const hBox = document.getElementById('hBox');
             const colorPicker = document.getElementById('magnetColor');
@@ -258,7 +301,7 @@
             });
 
             const uniformBuffer = device.createBuffer({
-                size: 528, 
+                size: 528,
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -270,27 +313,27 @@
             function updateSize() {
                 const w = parseInt(wBox.value) || 512;
                 const h = parseInt(hBox.value) || 512;
-                
+
                 const container = document.getElementById('container');
                 container.style.width = w + 'px';
                 container.style.height = h + 'px';
-                
+
                 canvas.width = w;
                 canvas.height = h;
                 canvas.style.width = w + 'px';
                 canvas.style.height = h + 'px';
-                
+
                 uiCanvas.width = w;
                 uiCanvas.height = h;
                 uiCanvas.style.width = w + 'px';
                 uiCanvas.style.height = h + 'px';
-                
+
                 needsUpdate = true;
             }
 
             wBox.addEventListener('change', updateSize);
             hBox.addEventListener('change', updateSize);
-            
+
             toggleBtn.addEventListener('click', () => {
                 showAnim = !showAnim;
                 toggleBtn.innerText = showAnim ? "Hide Pendulum Animation" : "Show Pendulum Animation";
@@ -358,15 +401,15 @@
             }
 
             uiCanvas.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return; 
+                if (e.button !== 0) return;
                 const m = getMousePos(e);
                 let hit = -1;
                 magnets.forEach((mag, i) => {
                     if (Math.hypot(mag.x - m.x, mag.y - m.y) < 0.15) hit = i;
                 });
 
-                if (hit !== -1) { 
-                    draggingIdx = hit; 
+                if (hit !== -1) {
+                    draggingIdx = hit;
                     selectedIdx = hit;
                     colorPicker.value = rgbToHex(magnets[hit].c);
                     colorPicker.disabled = false;
@@ -388,7 +431,7 @@
                 magnets.forEach((mag, i) => {
                     if (Math.hypot(mag.x - m.x, mag.y - m.y) < 0.15) hit = i;
                 });
-                
+
                 if (hit !== -1 && magnets.length > 1) {
                     magnets.splice(hit, 1);
                     if (selectedIdx === hit) {
@@ -413,7 +456,7 @@
 
             function drawBackground() {
                 if (!needsUpdate) return;
-                
+
                 const uniformData = new ArrayBuffer(528);
                 const floatView = new Float32Array(uniformData);
                 const uintView = new Uint32Array(uniformData);
@@ -421,11 +464,11 @@
                 floatView[0] = canvas.width;
                 floatView[1] = canvas.height;
                 uintView[2] = magnets.length;
-                
+
                 for (let i = 0; i < magnets.length; i++) {
                     floatView[4 + i * 4] = magnets[i].x;
                     floatView[4 + i * 4 + 1] = magnets[i].y;
-                    
+
                     floatView[68 + i * 4] = magnets[i].c[0];
                     floatView[68 + i * 4 + 1] = magnets[i].c[1];
                     floatView[68 + i * 4 + 2] = magnets[i].c[2];
@@ -463,7 +506,7 @@
                 magnets.forEach(m => {
                     const dx = m.x - p.p.x;
                     const dy = m.y - p.p.y;
-                    const d = Math.pow(dx*dx + dy*dy + h*h, 1.5);
+                    const d = Math.pow(dx * dx + dy * dy + h * h, 1.5);
                     fx += dx / d;
                     fy += dy / d;
                 });
@@ -472,10 +515,10 @@
                 p.v.y += fy * dt;
                 p.p.x += p.v.x * dt;
                 p.p.y += p.v.y * dt;
-                p.trail.push({x: p.p.x, y: p.p.y});
+                p.trail.push({ x: p.p.x, y: p.p.y });
                 if (p.trail.length > 100) p.trail.shift();
 
-                if (p.v.x*p.v.x + p.v.y*p.v.y < 0.001) {
+                if (p.v.x * p.v.x + p.v.y * p.v.y < 0.001) {
                     magnets.forEach(m => {
                         if (Math.hypot(m.x - p.p.x, m.y - p.p.y) < 0.15) activePendulum = null;
                     });
@@ -487,11 +530,11 @@
 
                 magnets.forEach((m, i) => {
                     const pos = screenToWorld(m.x, m.y);
-                    uctx.fillStyle = `rgb(${m.c[0]*255}, ${m.c[1]*255}, ${m.c[2]*255})`;
+                    uctx.fillStyle = `rgb(${m.c[0] * 255}, ${m.c[1] * 255}, ${m.c[2] * 255})`;
                     uctx.beginPath();
                     uctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
                     uctx.fill();
-                    
+
                     if (i === selectedIdx) {
                         uctx.strokeStyle = '#ff0';
                         uctx.lineWidth = 3;
@@ -535,4 +578,5 @@
         init();
     </script>
 </body>
+
 </html>
