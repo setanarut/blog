@@ -1,3 +1,4 @@
-- [Cyclic](https://setanarut.github.io/blog/cycle/)
+- [Cyclic GIF](https://setanarut.github.io/blog/cycle/)
+- [Fastlem](https://setanarut.github.io/blog/fastlem/)
 - [Magnetic pendulum](https://setanarut.github.io/blog/magnetic-pendulum/)
 - [Landscape Evolution](https://setanarut.github.io/fastlem-html/)
